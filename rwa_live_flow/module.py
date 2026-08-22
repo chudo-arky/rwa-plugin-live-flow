@@ -29,7 +29,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       now: 'Сейчас в сети', loading: 'загрузка…', updated: 'обновлено ', nodata: 'нет данных: ',
       online: ' онлайн', nodesCnt: ' нод',
       capUsers: 'ПОЛЬЗОВАТЕЛИ', capNodes: 'НОДЫ', capCascade: 'КАСКАД', capExit: 'ВЫХОД',
-      users: 'Пользователи', noUsers: 'нет пользователей', mbps: ' Мбит/с', ppl: ' чел.', active: ' активных', activeTip: 'активных по панели', vpn: 'VPN ⇅ ', net: 'сеть хоста', liveSrc: 'панель live', dbSrc: 'синк БД (до 5 мин)', mob: 'мобильный', fix: 'Wi-Fi/LAN', unk: 'сеть неизвестна', lgSplit: 'линии от групп слева: ', mobBox: 'Мобильная сеть', fixBox: 'Wi-Fi / LAN', unkBox: 'Сеть неизвестна', allBox: 'Пользователи', thNode: 'Нода', pGroup: 'Активные: ', pNoLive: 'живого опроса панели сейчас нет — сводный список по группам недоступен', pTrunc: 'срез панели неполный (юзеров больше лимита опроса)', pollErr: ' · опрос панели: ошибка', pollTimeout: ' · опрос панели: таймаут',
+      users: 'Пользователи', noUsers: 'нет пользователей', mbps: ' Мбит/с', ppl: ' чел.', active: ' активных', activeTip: 'активных по панели', vpn: 'VPN ⇅ ', net: 'сеть хоста', liveSrc: 'панель live', dbSrc: 'синк БД (до 5 мин)', mob: 'мобильный', fix: 'Wi-Fi/LAN', unk: 'сеть неизвестна', lgSplit: 'линии от групп слева: ', mobBox: 'Мобильная сеть', fixBox: 'Wi-Fi / LAN', unkBox: 'Сеть неизвестна', allBox: 'Пользователи', zIn: 'приблизить', zOut: 'отдалить', zReset: 'сбросить масштаб', zHint: 'колесо мыши — масштаб, перетаскивание — сдвиг', thNode: 'Нода', pGroup: 'Активные: ', pNoLive: 'живого опроса панели сейчас нет — сводный список по группам недоступен', pTrunc: 'срез панели неполный (юзеров больше лимита опроса)', pollErr: ' · опрос панели: ошибка', pollTimeout: ' · опрос панели: таймаут',
       internet: 'Интернет', blocked: 'Блокировка', toNet: 'выход в сеть', noMeasure: 'нет измерений',
       lgLive: 'идёт VPN-трафик (счётчики xray панели) — пунктир бежит', lgIdle: 'подключены, но молчат',
       lgBadge: 'в карточке ноды справа: реально активных по панели · счётчик ноды (с пингами авто-выбора)',
@@ -47,7 +47,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       now: 'Online now', loading: 'loading…', updated: 'updated ', nodata: 'no data: ',
       online: ' online', nodesCnt: ' nodes',
       capUsers: 'USERS', capNodes: 'NODES', capCascade: 'CASCADE', capExit: 'EXIT',
-      users: 'Users', noUsers: 'no users', mbps: ' Mbps', ppl: ' ppl', active: ' active', activeTip: 'active per panel', vpn: 'VPN ⇅ ', net: 'host NIC', liveSrc: 'panel live', dbSrc: 'DB sync (up to 5 min)', mob: 'mobile', fix: 'Wi-Fi/LAN', unk: 'unknown network', lgSplit: 'lines from the groups on the left: ', mobBox: 'Mobile network', fixBox: 'Wi-Fi / LAN', unkBox: 'Unknown network', allBox: 'Users', thNode: 'Node', pGroup: 'Active: ', pNoLive: 'no live panel poll right now — group lists are unavailable', pTrunc: 'panel snapshot is truncated (more users than the poll limit)', pollErr: ' · panel poll: error', pollTimeout: ' · panel poll: timeout',
+      users: 'Users', noUsers: 'no users', mbps: ' Mbps', ppl: ' ppl', active: ' active', activeTip: 'active per panel', vpn: 'VPN ⇅ ', net: 'host NIC', liveSrc: 'panel live', dbSrc: 'DB sync (up to 5 min)', mob: 'mobile', fix: 'Wi-Fi/LAN', unk: 'unknown network', lgSplit: 'lines from the groups on the left: ', mobBox: 'Mobile network', fixBox: 'Wi-Fi / LAN', unkBox: 'Unknown network', allBox: 'Users', zIn: 'zoom in', zOut: 'zoom out', zReset: 'reset zoom', zHint: 'mouse wheel — zoom, drag — pan', thNode: 'Node', pGroup: 'Active: ', pNoLive: 'no live panel poll right now — group lists are unavailable', pTrunc: 'panel snapshot is truncated (more users than the poll limit)', pollErr: ' · panel poll: error', pollTimeout: ' · panel poll: timeout',
       internet: 'Internet', blocked: 'Blocked', toNet: 'to the internet', noMeasure: 'not measured',
       lgLive: 'VPN traffic flowing (panel xray counters) — dashes move', lgIdle: 'connected but idle',
       lgBadge: 'on the node card, right: really active per panel · node counter (incl. auto-select probes)',
@@ -319,7 +319,13 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       // Схема подстраивается под окно: по ширине — viewBox, по высоте — max-height
       // от fit() (доступная высота окна минус легенда и панель), xMidYMin meet.
       V + '.lf-body{display:flex;flex-direction:column;gap:12px}' +
-      V + '.lf-canvas{flex:1 1 auto;min-width:0;text-align:center}' +
+      V + '.lf-canvas{flex:1 1 auto;min-width:0;text-align:center;position:relative;overflow:hidden;touch-action:none}' +
+      V + '.lf-zoom{transform-origin:0 0;will-change:transform}' +
+      V + '.lf-zoomed .lf-canvas{cursor:grab}' + V + '.lf-canvas.lf-dragging{cursor:grabbing}' +
+      V + '.lf-zoomctl{position:absolute;top:6px;right:8px;display:flex;gap:4px;z-index:2}' +
+      V + '.lf-zb{background:hsl(var(--card, 220 20% 10%) / .9);color:hsl(var(--foreground, 220 9% 84%));border:1px solid hsl(var(--border, 220 14% 18%));border-radius:6px;min-width:26px;height:24px;padding:0 7px;font:500 12px/1 ui-sans-serif,system-ui,sans-serif;cursor:pointer}' +
+      V + '.lf-zb:hover{border-color:hsl(var(--primary, 239 84% 67%) / .6)}' +
+      V + '.lf-zv{min-width:46px;font-variant-numeric:tabular-nums}' +
       V + '.lf-canvas svg{display:block;width:100%;height:auto;max-height:70vh;margin:0 auto}' +
       // На широком окне панель «кто на ноде» встаёт справа и не отъедает высоту у схемы
       '@media (min-width:1100px){' + V + '.lf-body{flex-direction:row;align-items:flex-start}' + V + '.lf-panel.open{flex:0 0 clamp(420px, 46%, 700px)}' + V + '.lf-pw{max-height:60vh}}' +
@@ -384,6 +390,8 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
   }
 
   var lastData = null, curLang = lang(), selected = null, panelData = null, canViewUsers = true;
+  // Масштаб схемы: трансформ живёт на обёртке .lf-zoom, поэтому переживает перерисовку SVG каждые 5 с
+  var zoom = { k: 1, x: 0, y: 0 }, ZMIN = 0.5, ZMAX = 4;
 
   // Подгонка масштаба под окно: ширина — сама (viewBox), высоту ограничиваем
   // тем, что осталось от окна ниже схемы (легенда, панель, поля). Иначе при
@@ -400,7 +408,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
   }
 
   function paint(view, d) {
-    view.querySelector('.lf-canvas').innerHTML = renderSvg(d, selected);
+    view.querySelector('.lf-zoom').innerHTML = renderSvg(d, selected);
     canViewUsers = d.can_view_users !== false;   // false — права view_users нет; клики не предлагаем
     view.classList.toggle('lf-noclick', !canViewUsers);
     view.querySelector('.lf-h1').textContent = t().title;
@@ -543,7 +551,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     if (selected === uuid) { closePanel(view); return; }
     selected = uuid;
     panelData = null;
-    if (lastData) view.querySelector('.lf-canvas').innerHTML = renderSvg(lastData, selected);
+    if (lastData) view.querySelector('.lf-zoom').innerHTML = renderSvg(lastData, selected);
     var panel = view.querySelector('.lf-panel');
     panel.innerHTML = '<div class="lf-ph"><b>' + t().pUsers + '</b><span class="lf-pc">' + t().loading + '</span></div>';
     panel.classList.add('open');
@@ -560,7 +568,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     var panel = view.querySelector('.lf-panel');
     panel.classList.remove('open');
     panel.innerHTML = '';
-    if (lastData) view.querySelector('.lf-canvas').innerHTML = renderSvg(lastData, null);
+    if (lastData) view.querySelector('.lf-zoom').innerHTML = renderSvg(lastData, null);
     fit(view);
   }
 
@@ -579,7 +587,10 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       '<p class="lf-sub">' + t().sub + '</p>' +
       '<div class="lf-card">' +
       '<div class="lf-head"><span class="lf-now">' + t().now + '</span><span class="lf-total">—</span><span class="lf-meta">' + t().loading + '</span></div>' +
-      '<div class="lf-body"><div class="lf-canvas"></div><div class="lf-panel"></div></div>' +
+      '<div class="lf-body"><div class="lf-canvas"><div class="lf-zoom"></div>' +
+      '<div class="lf-zoomctl" title="' + t().zHint + '"><button type="button" class="lf-zb" data-z="out" title="' + t().zOut + '">−</button>' +
+      '<button type="button" class="lf-zb lf-zv" data-z="reset" title="' + t().zReset + '">100%</button>' +
+      '<button type="button" class="lf-zb" data-z="in" title="' + t().zIn + '">+</button></div></div><div class="lf-panel"></div></div>' +
       '<div class="lf-legend"><span><i style="color:hsl(var(--primary, 239 84% 67%))"></i>' + t().lgLive + '</span>' +
       '<span><i style="color:hsl(var(--muted-foreground, 220 9% 56%))"></i>' + t().lgIdle + '</span>' +
       '<span>' + t().lgBadge + '</span><span class="lf-split-lg"></span><span class="lf-note"></span></div></div>';
@@ -593,9 +604,79 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       var grp = g.getAttribute('data-group');
       openPanel(view, grp ? 'g:' + grp : 'n:' + g.getAttribute('data-uuid'));
     }
-    canvas.addEventListener('click', pick);
+    canvas.addEventListener('click', function (ev) { if (dragged) { dragged = false; return; } pick(ev); });
     canvas.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' || ev.key === ' ') pick(ev); });
+    setupZoom(view, canvas);
     return view;
+  }
+
+  // ── масштаб: кнопки, колесо (к курсору), перетаскивание ──
+  var dragged = false;
+  function applyZoom(view) {
+    var z = view.querySelector('.lf-zoom'), v = view.querySelector('.lf-zv');
+    if (z) z.style.transform = 'translate(' + zoom.x.toFixed(1) + 'px,' + zoom.y.toFixed(1) + 'px) scale(' + zoom.k.toFixed(3) + ')';
+    if (v) v.textContent = Math.round(zoom.k * 100) + '%';
+    view.classList.toggle('lf-zoomed', zoom.k !== 1 || zoom.x !== 0 || zoom.y !== 0);
+  }
+  function zoomAt(view, factor, cx, cy) {
+    // cx, cy — точка в координатах .lf-canvas, которая должна остаться на месте
+    var k2 = Math.min(ZMAX, Math.max(ZMIN, zoom.k * factor));
+    if (k2 === zoom.k) return;
+    zoom.x = cx - (cx - zoom.x) * (k2 / zoom.k);
+    zoom.y = cy - (cy - zoom.y) * (k2 / zoom.k);
+    zoom.k = k2;
+    if (Math.abs(zoom.k - 1) < 0.01) { zoom.k = 1; }
+    applyZoom(view);
+  }
+  function resetZoom(view) { zoom.k = 1; zoom.x = 0; zoom.y = 0; applyZoom(view); }
+  function setupZoom(view, canvas) {
+    var ctl = view.querySelector('.lf-zoomctl');
+    ctl.addEventListener('click', function (ev) {
+      var b = ev.target && ev.target.closest ? ev.target.closest('.lf-zb') : null;
+      if (!b) return;
+      ev.preventDefault(); ev.stopPropagation();
+      var r = canvas.getBoundingClientRect(), cx = r.width / 2, cy = r.height / 2;
+      if (b.getAttribute('data-z') === 'in') zoomAt(view, 1.25, cx, cy);
+      else if (b.getAttribute('data-z') === 'out') zoomAt(view, 1 / 1.25, cx, cy);
+      else resetZoom(view);
+    });
+    // Колесо: масштаб к курсору; preventDefault, чтобы страница не листалась под схемой
+    canvas.addEventListener('wheel', function (ev) {
+      if (ev.target && ev.target.closest && ev.target.closest('.lf-zoomctl')) return;
+      ev.preventDefault();
+      var r = canvas.getBoundingClientRect();
+      var f = ev.deltaY < 0 ? 1.12 : 1 / 1.12;
+      zoomAt(view, f, ev.clientX - r.left, ev.clientY - r.top);
+    }, { passive: false });
+    // Перетаскивание: двигаем схему; от клика отличаем по сдвигу > 4px
+    var down = null;
+    canvas.addEventListener('pointerdown', function (ev) {
+      if (ev.button !== 0 || (ev.target && ev.target.closest && ev.target.closest('.lf-zoomctl'))) return;
+      down = { x: ev.clientX, y: ev.clientY, zx: zoom.x, zy: zoom.y, moved: false, id: ev.pointerId };
+    });
+    canvas.addEventListener('pointermove', function (ev) {
+      if (!down || ev.pointerId !== down.id) return;
+      var dx = ev.clientX - down.x, dy = ev.clientY - down.y;
+      if (!down.moved && Math.abs(dx) + Math.abs(dy) < 4) return;
+      if (!down.moved) { down.moved = true; canvas.classList.add('lf-dragging'); try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ } }
+      zoom.x = down.zx + dx; zoom.y = down.zy + dy;
+      applyZoom(view);
+    });
+    function up(ev) {
+      if (!down) return;
+      if (down.moved) { dragged = true; setTimeout(function () { dragged = false; }, 0); }
+      canvas.classList.remove('lf-dragging');
+      try { canvas.releasePointerCapture(down.id); } catch (e) { /* ignore */ }
+      down = null;
+    }
+    canvas.addEventListener('pointerup', up);
+    canvas.addEventListener('pointercancel', up);
+    // Двойной клик по пустому месту — сброс
+    canvas.addEventListener('dblclick', function (ev) {
+      if (ev.target && ev.target.closest && (ev.target.closest('.lf-node') || ev.target.closest('.lf-zoomctl'))) return;
+      resetZoom(view);
+    });
+    applyZoom(view);
   }
 
   function mount(el) {
@@ -623,7 +704,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     if (panelTimer) { clearInterval(panelTimer); panelTimer = null; }
     if (resizeFn) { window.removeEventListener('resize', resizeFn); resizeFn = null; }
     if (keyFn) { document.removeEventListener('keydown', keyFn); keyFn = null; }
-    selected = null; panelData = null;
+    selected = null; panelData = null; zoom = { k: 1, x: 0, y: 0 };
     var v = document.getElementById(VIEW_ID);
     if (v) v.remove();
   }

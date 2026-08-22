@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rwa-plugin-live-flow"
-version = "0.16.0"
+version = "0.17.0"
 description = "Живая схема трафика для remnawave-admin: пользователи → ноды → выход"
 readme = "README.md"
 license = { text = "MIT" }
