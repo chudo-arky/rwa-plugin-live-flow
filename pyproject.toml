@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rwa-plugin-live-flow"
+version = "0.16.0"
+description = "Живая схема трафика для remnawave-admin: пользователи → ноды → выход"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "chudo-arky" }]
+requires-python = ">=3.11"
+keywords = ["remnawave", "remnawave-admin", "plugin", "vpn", "xray"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Plugins",
+  "Framework :: FastAPI",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: System :: Networking :: Monitoring",
+]
+
+[project.urls]
+Homepage = "https://github.com/chudo-arky/rwa-plugin-live-flow"
+Source = "https://github.com/chudo-arky/rwa-plugin-live-flow"
+Changelog = "https://github.com/chudo-arky/rwa-plugin-live-flow/blob/main/CHANGELOG.md"
+Issues = "https://github.com/chudo-arky/rwa-plugin-live-flow/issues"
+
+[project.entry-points."rwa.plugin"]
+live_flow = "rwa_live_flow:manifest"
+
+[tool.setuptools]
+packages = ["rwa_live_flow"]
+
+[tool.setuptools.package-data]
+rwa_live_flow = ["py.typed"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP"]
+ignore = ["E501", "B008", "UP017", "UP041"]  # B008: Depends(...) — идиома FastAPI; UP017/UP041: оставляем timezone.utc/asyncio.TimeoutError, чтобы тесты шли и на 3.9
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+
+[tool.bandit]
+# B608: SQL собирается только из констант модуля (CASE/regex-обёртки), все данные — через $1/$2 asyncpg.
+skips = ["B608"]
