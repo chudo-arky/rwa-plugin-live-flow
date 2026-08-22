@@ -1,7 +1,4 @@
 # Changelog
-
-Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версии — [SemVer](https://semver.org/lang/ru/).
-
 ## [0.16.0] — 2026-08-22
 
 Первый публичный релиз. Изменений относительно предыдущих версий нет — это стартовая точка.
