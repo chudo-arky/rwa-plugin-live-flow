@@ -17,14 +17,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
       - name: Install package and tooling
-        run: python -m pip install --upgrade pip && python -m pip install -e . build twine pytest pytest-asyncio ruff bandit fastapi
+        run: python -m pip install --upgrade pip && python -m pip install -e . build twine pytest pytest-asyncio ruff bandit fastapi httpx
       - name: Lint
         run: ruff check .
       - name: Security scan
         run: bandit -q -c pyproject.toml -r rwa_live_flow
       - name: Tests
         run: pytest -q
+      - name: UI layout tests (node)
+        run: node --test tests/js/
       - name: Build wheel from clean tree
         run: python -m build
       - name: Check metadata

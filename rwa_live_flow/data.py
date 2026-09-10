@@ -152,13 +152,18 @@ async def _profiles_cached(logger) -> tuple[dict[str, dict] | None, bool]:
     return c["data"], c["stale"]
 
 
-async def _snippets_by_name(logger, timeout: float | None = None, quiet: bool = False) -> dict[str, list]:
+async def _snippets_by_name(logger, timeout: float | None = None, quiet: bool = False) -> dict[str, list] | None:
     """Сниппеты панели: имя → содержимое (список аутбаундов или правил).
 
     В конфиг-профиле сниппет лежит нераскрытой ссылкой ``{"snippet": "имя"}``
     (панель подставляет его только при сборке конфига ноды), поэтому WARP,
-    вынесенный в сниппет, без этого на схеме не появлялся. Ошибка запроса —
-    пустая карта: схема рисуется без сниппетных выходов, а не падает."""
+    вынесенный в сниппет, без этого на схеме не появлялся.
+
+    Возвращает ``None``, если запрос упал (сбой панели/таймаут) — это НЕ то же,
+    что успешный пустой ответ ``{}``: при сбое профили со ссылками считаются
+    незагруженными, и ``_profiles_cached`` оставляет последний удачный набор с
+    пометкой stale. У клиента без метода сниппетов — ``{}``: раскрыть нечем,
+    ссылки останутся неразрешёнными и будут помечены в ответе."""
     import asyncio
 
     from web.backend.core.plugin_api import panel_api
@@ -172,9 +177,13 @@ async def _snippets_by_name(logger, timeout: float | None = None, quiet: bool = 
     except Exception:  # noqa: BLE001
         if not quiet:
             logger.exception("live_flow: snippets request failed")
-        return {}
+        return None
     body = resp.get("response") if isinstance(resp, dict) else None
     items = body.get("snippets") if isinstance(body, dict) else None
+    if not isinstance(body, dict) or not isinstance(items, list):
+        if not quiet:
+            logger.warning("live_flow: snippets response has unexpected shape")
+        return None
     out: dict[str, list] = {}
     for s in items if isinstance(items, list) else []:
         if not isinstance(s, dict) or not s.get("name"):
@@ -187,16 +196,28 @@ async def _snippets_by_name(logger, timeout: float | None = None, quiet: bool = 
     return out
 
 
-def _expand_snippets(items: list, snippets: dict[str, list]) -> list:
+def _snippet_refs(items: list) -> list[str]:
+    """Имена сниппетов, на которые ссылается список аутбаундов."""
+    return [str(o.get("snippet")) for o in items if isinstance(o, dict) and "snippet" in o and not o.get("tag")]
+
+
+def _expand_snippets(items: list, snippets: dict[str, list]) -> tuple[list, list[str]]:
     """Заменяет ссылки ``{"snippet": "имя"}`` содержимым сниппета (один уровень:
-    сниппет внутри сниппета панель не поддерживает). Неизвестное имя — пропуск."""
+    сниппет внутри сниппета панель не поддерживает). Возвращает (список,
+    неразрешённые имена): неизвестное имя не пропадает молча — оно попадает в
+    ответ, а вместо него НЕ подставляется DIRECT."""
     out: list = []
+    unresolved: list[str] = []
     for o in items:
         if isinstance(o, dict) and "snippet" in o and not o.get("tag"):
-            out.extend(snippets.get(str(o.get("snippet")), []))
+            name = str(o.get("snippet"))
+            if name in snippets:
+                out.extend(snippets[name])
+            elif name not in unresolved:
+                unresolved.append(name)
         else:
             out.append(o)
-    return out
+    return out, unresolved
 
 
 async def _profiles_by_uuid(logger, timeout: float | None = None, quiet: bool = False) -> dict[str, dict] | None:
@@ -217,8 +238,7 @@ async def _profiles_by_uuid(logger, timeout: float | None = None, quiet: bool = 
     items = body.get("configProfiles") if isinstance(body, dict) else None
     if not isinstance(items, list):
         items = []
-    snippets = await _snippets_by_name(logger, timeout=timeout, quiet=quiet)
-    out: dict[str, dict] = {}
+    parsed: list[tuple[dict, dict]] = []
     for p in items:
         # Один кривой профиль не должен ронять схему: всё, что не той формы, пропускаем.
         if not isinstance(p, dict) or not p.get("uuid"):
@@ -229,12 +249,35 @@ async def _profiles_by_uuid(logger, timeout: float | None = None, quiet: bool = 
                 cfg = json.loads(cfg)
             except ValueError:
                 cfg = {}
-        if not isinstance(cfg, dict):
-            cfg = {}
-        outs = _expand_snippets(cfg.get("outbounds") if isinstance(cfg.get("outbounds"), list) else [], snippets)
+        parsed.append((p, cfg if isinstance(cfg, dict) else {}))
+    # Сниппеты нужны только профилям со ссылками. Если такие есть, а запрос
+    # сниппетов упал — набор профилей считается незагруженным целиком: иначе
+    # ссылки исчезли бы, а пустой список выходов лёг бы в кэш как «удачный».
+    raw_outs = {
+        str(p["uuid"]): (cfg.get("outbounds") if isinstance(cfg.get("outbounds"), list) else [])
+        for p, cfg in parsed
+    }
+    needs_snippets = any(_snippet_refs(o) for o in raw_outs.values())
+    snippets: dict[str, list] = {}
+    if needs_snippets:
+        got = await _snippets_by_name(logger, timeout=timeout, quiet=quiet)
+        if got is None:
+            return None
+        snippets = got
+    out: dict[str, dict] = {}
+    for p, cfg in parsed:
+        # Один кривой профиль не должен ронять схему: всё, что не той формы, пропускаем.
+        if not isinstance(p, dict) or not p.get("uuid"):
+            continue
+        raw = raw_outs[str(p["uuid"])]
+        outs, unresolved = _expand_snippets(raw, snippets)
         ins = cfg.get("inbounds") if isinstance(cfg.get("inbounds"), list) else []
         out[str(p.get("uuid"))] = {
             "name": p.get("name"),
+            # были ли выходы в сыром конфиге (включая ссылки): пустой список при
+            # неразрешённой ссылке — не повод подставлять DIRECT (см. _effective_outbounds)
+            "has_outbounds": bool(raw),
+            "snippets_unresolved": unresolved,
             "outbounds": [
                 {"tag": str(o.get("tag")), "protocol": str(o.get("protocol") or ""), "addr": _outbound_addr(o)}
                 for o in outs
@@ -266,6 +309,27 @@ def _inbound_behind_cdn(ib: dict) -> bool:
 
 def _cdn_tags(profiles: dict | None) -> set[str]:
     return {t for p in (profiles or {}).values() for t in (p.get("cdn_inbounds") or [])}
+
+
+_DEFAULT_OUTBOUNDS = [{"tag": "DIRECT", "protocol": "freedom"}]
+
+
+def _effective_outbounds(profile: dict, profiles_available: bool) -> list[dict]:
+    """Выходы ноды по её профилю.
+
+    DIRECT по умолчанию — только когда профили получены, но у ноды профиля нет
+    или в его конфиге не было выходов вовсе. Профиль, у которого выходы были,
+    но после раскрытия сниппетов список опустел (ссылка не разрешилась),
+    остаётся ПУСТЫМ: выдуманный DIRECT скрыл бы проблему. При упавшем запросе
+    профилей выходы не рисуем вовсе.
+    """
+    if not profiles_available:
+        return []
+    if not profile:
+        return list(_DEFAULT_OUTBOUNDS)
+    if profile.get("has_outbounds"):
+        return list(profile.get("outbounds") or [])
+    return list(profile.get("outbounds") or _DEFAULT_OUTBOUNDS)
 
 
 def _profile_uuid(raw: Any) -> str | None:
@@ -387,14 +451,13 @@ async def collect(ctx) -> dict:
     sinks: dict[str, dict] = {}
     nodes: list[dict] = []
 
+    snippets_unresolved: list[str] = []
     for row in rows:
         profile = (profiles or {}).get(_profile_uuid(row["raw_data"]) or "") or {}
-        if profiles_available:
-            # DIRECT по умолчанию — только когда профили получены, но у этой ноды
-            # профиля нет или он пуст. При упавшем запросе выходы не рисуем вовсе.
-            outbounds = profile.get("outbounds") or [{"tag": "DIRECT", "protocol": "freedom"}]
-        else:
-            outbounds = []
+        outbounds = _effective_outbounds(profile, profiles_available)
+        for name in profile.get("snippets_unresolved") or []:
+            if name not in snippets_unresolved:
+                snippets_unresolved.append(name)
 
         node_sinks: list[str] = []
         cascades: list[str] = []
@@ -459,6 +522,9 @@ async def collect(ctx) -> dict:
         "sinks": ordered,
         "profiles_available": profiles_available,
         "profiles_stale": bool(profiles_stale),
+        # сниппеты, на которые ссылаются профили нод, но которых у панели нет:
+        # ветки из них на схеме отсутствуют, UI показывает предупреждение
+        "snippets_unresolved": snippets_unresolved,
     }
 
 

@@ -25,7 +25,7 @@ _UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F
 
 
 def build_router(ctx):
-    from fastapi import APIRouter, Depends, HTTPException
+    from fastapi import APIRouter, Depends, HTTPException, Query
     from fastapi.responses import HTMLResponse, Response
 
     from web.backend.core.plugin_api import auth_deps
@@ -81,17 +81,30 @@ def build_router(ctx):
             raise HTTPException(status_code=404, detail={"code": "cascade_not_found"})
         return _json(data)
 
-    @router.get("/exit/{tag}/users", summary="Кто сейчас на нодах с этим выходом (live_flow:view_users)")
-    async def exit_users_route(
-        tag: str,
-        _admin: AdminUser = Depends(require_permission("live_flow", "view_users")),
-    ):
+    async def _exit_users(tag: str):
         if not tag or len(tag) > 100:
             raise HTTPException(status_code=422, detail={"code": "bad_tag"})
         data = await exit_users(ctx, tag)
         if data is None:
             raise HTTPException(status_code=404, detail={"code": "exit_not_found"})
         return _json(data)
+
+    # Тег выхода — query-параметр: тег xray может содержать «/», а в пути
+    # он даже в виде %2F не доходит до обработчика (404 на уровне маршрутизации).
+    @router.get("/exit/users", summary="Кто сейчас на нодах с этим выходом, тег в ?tag= (live_flow:view_users)")
+    async def exit_users_query_route(
+        tag: str = Query(..., min_length=1, max_length=100),
+        _admin: AdminUser = Depends(require_permission("live_flow", "view_users")),
+    ):
+        return await _exit_users(tag)
+
+    # Прежний маршрут оставлен для совместимости: работает для тегов без «/».
+    @router.get("/exit/{tag}/users", summary="То же для тегов без «/» (совместимость; live_flow:view_users)")
+    async def exit_users_route(
+        tag: str,
+        _admin: AdminUser = Depends(require_permission("live_flow", "view_users")),
+    ):
+        return await _exit_users(tag)
 
     @router.get("/group/{group}/users", summary="Сводный список активных по типу сети: mobile | fixed | cdn | unknown | all (live_flow:view_users)")
     async def group_users_route(

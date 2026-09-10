@@ -111,7 +111,8 @@ def test_inbound_behind_cdn_and_local_ip():
 
 def test_cdn_is_own_group():
     assert "cdn" in D.GROUPS
-    src = open(D.__file__, encoding="utf-8").read()
+    with open(D.__file__, encoding="utf-8") as fh:
+        src = fh.read()
     assert 'cls[str(r["id"])] = "cdn"' in src
 
 
@@ -199,27 +200,27 @@ def test_online_at_regex_rejects_garbage():
 # ── каскад: матчинг «аутбаунд → наша нода» по строке и по IP (0.18.0) ──
 
 def test_norm_host_and_ip_literal():
-    assert D._norm_host(" Fra-01.Tusi.UK. ") == "fra-01.tusi.uk"
+    assert D._norm_host(" Node-A.Example.TEST. ") == "node-a.example.test"
     assert D._norm_host("[2a01:db8::1]") == "2a01:db8::1"
-    assert D._ip_literal("87.251.86.174") == "87.251.86.174"
+    assert D._ip_literal("203.0.113.10") == "203.0.113.10"
     assert D._ip_literal("2A01:DB8::1") == "2a01:db8::1"
-    assert D._ip_literal("fra-01.tusi.uk") is None
+    assert D._ip_literal("node-a.example.test") is None
     assert D._ip_literal("") is None
 
 
 def test_cascade_target_string_ip_and_self():
-    a2u = {"fl.mikelfrost.ru": "hel", "87.251.86.174": "fra", "5.42.120.152": "mow"}
-    resolved = {"fra-01.tusi.uk": frozenset({"87.251.86.174"}), "elsewhere.example": frozenset({"9.9.9.9"})}
+    a2u = {"node-b.example.test": "nb", "203.0.113.10": "na", "198.51.100.5": "src"}
+    resolved = {"node-a.example.test": frozenset({"203.0.113.10"}), "elsewhere.example": frozenset({"9.9.9.9"})}
     # домен = домен
-    assert D._cascade_target("FL.mikelfrost.ru", "mow", a2u, resolved) == "hel"
+    assert D._cascade_target("NODE-B.example.test", "src", a2u, resolved) == "nb"
     # аутбаунд доменом, нода в панели IP — совпадение через резолв
-    assert D._cascade_target("fra-01.tusi.uk", "mow", a2u, resolved) == "fra"
+    assert D._cascade_target("node-a.example.test", "src", a2u, resolved) == "na"
     # чужой сервер — не каскад
-    assert D._cascade_target("elsewhere.example", "mow", a2u, resolved) is None
-    assert D._cascade_target("unresolved.example", "mow", a2u, resolved) is None
+    assert D._cascade_target("elsewhere.example", "src", a2u, resolved) is None
+    assert D._cascade_target("unresolved.example", "src", a2u, resolved) is None
     # на саму себя — не каскад
-    assert D._cascade_target("5.42.120.152", "mow", a2u, resolved) is None
-    assert D._cascade_target(None, "mow", a2u, resolved) is None
+    assert D._cascade_target("198.51.100.5", "src", a2u, resolved) is None
+    assert D._cascade_target(None, "src", a2u, resolved) is None
 
 
 async def test_resolve_hosts_uses_cache_and_survives_failures(monkeypatch):
@@ -235,22 +236,22 @@ async def test_resolve_hosts_uses_cache_and_survives_failures(monkeypatch):
                 raise socket.gaierror("nope")
             if host == "slow.example":
                 await asyncio.sleep(5)
-            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("87.251.86.174", 0)),
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("203.0.113.10", 0)),
                     (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2a01:db8::1", 0, 0, 0))]
 
     monkeypatch.setattr(asyncio, "get_running_loop", lambda: Loop())
     monkeypatch.setattr(D, "RESOLVE_TIMEOUT_S", 0.05)
     D._resolve_cache.clear()
 
-    out = await D._resolve_hosts(["Fra-01.tusi.uk", "87.251.86.174", "boom.example", "slow.example", "", None])
-    assert out["fra-01.tusi.uk"] == frozenset({"87.251.86.174", "2a01:db8::1"})
-    assert out["87.251.86.174"] == frozenset({"87.251.86.174"})   # литерал — без DNS
+    out = await D._resolve_hosts(["Node-a.example.test", "203.0.113.10", "boom.example", "slow.example", "", None])
+    assert out["node-a.example.test"] == frozenset({"203.0.113.10", "2a01:db8::1"})
+    assert out["203.0.113.10"] == frozenset({"203.0.113.10"})   # литерал — без DNS
     assert out["boom.example"] == frozenset() and out["slow.example"] == frozenset()
-    assert sorted(calls) == ["boom.example", "fra-01.tusi.uk", "slow.example"]
+    assert sorted(calls) == ["boom.example", "node-a.example.test", "slow.example"]
 
     calls.clear()
-    out2 = await D._resolve_hosts(["fra-01.tusi.uk", "boom.example"])
-    assert out2["fra-01.tusi.uk"] == out["fra-01.tusi.uk"] and calls == []   # оба из кэша (неудача — тоже, на короткий срок)
+    out2 = await D._resolve_hosts(["node-a.example.test", "boom.example"])
+    assert out2["node-a.example.test"] == out["node-a.example.test"] and calls == []   # оба из кэша (неудача — тоже, на короткий срок)
     D._resolve_cache.clear()
 
 
@@ -285,7 +286,7 @@ def test_module_js_drag_and_card_lists():
     grid = js.split("function renderGrid")[1].split("function ensureStyle")[0]
     assert "cascadeHops(d, nodes)" in grid and "drawHopCard(h, pos['h:' + h.uuid])" in grid and "corr" not in grid
     # списки по клику на прыжок каскада и выход
-    assert "'/cascade/' + id + '/users'" in js and "'/exit/' + id + '/users'" in js
+    assert "'/cascade/' + id + '/users'" in js and "'/exit/users?tag=' + id" in js
     assert 'class="lf-hop" data-hop=' in js and 'class="lf-sink" data-sink=' in js
     assert ".lf-node, .lf-hop, .lf-sink" in js and "pByNodes" in js
     # переключатель списка не пересекается по классу с подсказкой внутри панели
@@ -296,9 +297,9 @@ def test_module_js_drag_and_card_lists():
 async def test_cascade_and_exit_users_shape(monkeypatch):
     # collect() и poller подменяем: интересует только выбор нод и форма ответа
     nodes = [
-        {"uuid": "mow", "name": "MOW-01", "cascades": ["hel", "fra"], "sinks": ["DIRECT"]},
-        {"uuid": "hel", "name": "HEL-02", "cascades": [], "sinks": ["DIRECT", "warp-out"]},
-        {"uuid": "fra", "name": "FRA-01", "cascades": [], "sinks": ["DIRECT"]},
+        {"uuid": "src", "name": "node-src", "cascades": ["nb", "na"], "sinks": ["DIRECT"]},
+        {"uuid": "nb", "name": "node-b", "cascades": [], "sinks": ["DIRECT", "warp-out"]},
+        {"uuid": "na", "name": "node-a", "cascades": [], "sinks": ["DIRECT"]},
     ]
     sinks = [{"tag": "DIRECT", "title": "Интернет", "kind": "internet"}, {"tag": "warp-out", "title": "warp-out", "kind": "internet"}]
 
@@ -315,15 +316,15 @@ async def test_cascade_and_exit_users_shape(monkeypatch):
     monkeypatch.setattr(D, "collect", fake_collect)
     monkeypatch.setattr(D, "_nodes_users", fake_nodes_users)
 
-    out = await D.cascade_users(None, "hel")
-    assert out["kind"] == "cascade" and out["target"] == {"uuid": "hel", "name": "HEL-02"}
-    assert out["nodes"] == ["MOW-01"] and out["by_nodes"] is True and seen["uuids"] == {"mow"}
+    out = await D.cascade_users(None, "nb")
+    assert out["kind"] == "cascade" and out["target"] == {"uuid": "nb", "name": "node-b"}
+    assert out["nodes"] == ["node-src"] and out["by_nodes"] is True and seen["uuids"] == {"src"}
     assert await D.cascade_users(None, "nope") is None
 
     out = await D.exit_users(None, "warp-out")
-    assert out["kind"] == "exit" and out["sink"]["tag"] == "warp-out" and out["nodes"] == ["HEL-02"] and seen["uuids"] == {"hel"}
+    assert out["kind"] == "exit" and out["sink"]["tag"] == "warp-out" and out["nodes"] == ["node-b"] and seen["uuids"] == {"nb"}
     out = await D.exit_users(None, "DIRECT")
-    assert seen["uuids"] == {"mow", "hel", "fra"}
+    assert seen["uuids"] == {"src", "nb", "na"}
     assert await D.exit_users(None, "ghost") is None
 
 
@@ -332,7 +333,7 @@ async def test_profiles_expand_snippets(fake_panel):
         async def get_snippets(self):
             return {"response": {"total": 2, "snippets": [
                 {"name": "warp", "snippet": [{"tag": "warp-out", "protocol": "freedom", "settings": {}}]},
-                {"name": "casc", "snippet": {"tag": "casc-de", "protocol": "vless", "settings": {"vnext": [{"address": "fra-01.tusi.uk"}]}}},
+                {"name": "casc", "snippet": {"tag": "casc-de", "protocol": "vless", "settings": {"vnext": [{"address": "node-a.example.test"}]}}},
                 {"name": "broken", "snippet": "not a list"},
                 "junk",
             ]}}
@@ -349,22 +350,167 @@ async def test_profiles_expand_snippets(fake_panel):
     out = await D._profiles_by_uuid(_Logger())
     tags = [o["tag"] for o in out["p1"]["outbounds"]]
     assert tags == ["DIRECT", "warp-out", "casc-de", "BLOCK"]
-    assert [o["addr"] for o in out["p1"]["outbounds"] if o["tag"] == "casc-de"] == ["fra-01.tusi.uk"]
+    assert [o["addr"] for o in out["p1"]["outbounds"] if o["tag"] == "casc-de"] == ["node-a.example.test"]
 
 
-async def test_profiles_without_snippets_api(fake_panel):
-    # старый клиент без get_snippets или упавший запрос — ссылки просто пропускаются
+async def test_profiles_without_snippets_api_marks_unresolved(fake_panel):
+    # старый клиент без get_snippets: раскрыть нечем — ссылка помечена неразрешённой, DIRECT не выдумывается
     fake_panel["api"] = _FakePanel({"response": {"configProfiles": [
         {"uuid": "p1", "name": "x", "config": {"outbounds": [{"tag": "DIRECT", "protocol": "freedom"}, {"snippet": "warp"}]}},
     ]}})
     out = await D._profiles_by_uuid(_Logger())
     assert [o["tag"] for o in out["p1"]["outbounds"]] == ["DIRECT"]
+    assert out["p1"]["snippets_unresolved"] == ["warp"] and out["p1"]["has_outbounds"] is True
 
+
+async def test_profiles_snippet_request_failure_means_profiles_not_loaded(fake_panel):
+    # запрос сниппетов упал, а профили на них ссылаются — набор не загружен (None), а не «пусто и успешно»
     class Boom(_FakePanel):
         async def get_snippets(self):
             raise RuntimeError("x")
     fake_panel["api"] = Boom({"response": {"configProfiles": [
         {"uuid": "p1", "name": "x", "config": {"outbounds": [{"snippet": "warp"}, {"tag": "BLOCK", "protocol": "blackhole"}]}},
     ]}})
+    assert await D._profiles_by_uuid(_Logger()) is None
+    # без ссылок сниппеты не нужны — сбой их запроса ни на что не влияет
+    fake_panel["api"] = Boom({"response": {"configProfiles": [
+        {"uuid": "p2", "name": "y", "config": {"outbounds": [{"tag": "DIRECT", "protocol": "freedom"}]}},
+    ]}})
     out = await D._profiles_by_uuid(_Logger())
-    assert [o["tag"] for o in out["p1"]["outbounds"]] == ["BLOCK"]
+    assert [o["tag"] for o in out["p2"]["outbounds"]] == ["DIRECT"] and out["p2"]["snippets_unresolved"] == []
+
+
+def _panel_with_snippets(profiles, snippets):
+    class Panel(_FakePanel):
+        async def get_snippets(self):
+            if isinstance(snippets, Exception):
+                raise snippets
+            return {"response": {"total": len(snippets), "snippets": snippets}}
+    return Panel({"response": {"configProfiles": profiles}})
+
+
+_WARP_ONLY = [{"uuid": "p1", "name": "warp-only", "config": {"outbounds": [{"snippet": "warp"}]}}]
+_WARP_SNIPPET = [{"name": "warp", "snippet": [{"tag": "warp-out", "protocol": "freedom", "settings": {}}]}]
+
+
+async def test_snippets_success_failure_recovery_keeps_last_good(fake_panel, monkeypatch):
+    # профиль из одного WARP-сниппета: успех → сбой сниппетов после истечения кэша → восстановление
+    monkeypatch.setattr(D, "PROFILES_TTL_S", 0.0)
+    D._profiles_cache.update(ts=0.0, data=None, stale=False, last_log=0.0)
+    fake_panel["api"] = _panel_with_snippets(_WARP_ONLY, _WARP_SNIPPET)
+    data, stale = await D._profiles_cached(_Logger())
+    assert stale is False and [o["tag"] for o in data["p1"]["outbounds"]] == ["warp-out"]
+
+    fake_panel["api"] = _panel_with_snippets(_WARP_ONLY, RuntimeError("snippets down"))
+    data2, stale2 = await D._profiles_cached(_Logger())
+    assert stale2 is True and [o["tag"] for o in data2["p1"]["outbounds"]] == ["warp-out"]   # последний удачный, помечен stale
+    assert D._effective_outbounds(data2["p1"], True) == data2["p1"]["outbounds"]            # и никакого DIRECT
+
+    fake_panel["api"] = _panel_with_snippets(_WARP_ONLY, _WARP_SNIPPET)
+    data3, stale3 = await D._profiles_cached(_Logger())
+    assert stale3 is False and [o["tag"] for o in data3["p1"]["outbounds"]] == ["warp-out"]
+
+
+async def test_snippets_cold_start_failure_means_config_unavailable(fake_panel, monkeypatch):
+    monkeypatch.setattr(D, "PROFILES_TTL_S", 0.0)
+    D._profiles_cache.update(ts=0.0, data=None, stale=False, last_log=0.0)
+    fake_panel["api"] = _panel_with_snippets(_WARP_ONLY, RuntimeError("snippets down"))
+    data, stale = await D._profiles_cached(_Logger())
+    assert data is None and stale is False          # холодный старт: конфигурации нет, UI покажет «недоступна»
+    assert D._effective_outbounds({}, False) == []   # выходов не рисуем, DIRECT не выдумываем
+
+
+async def test_snippets_empty_success_is_unresolved_not_direct(fake_panel):
+    # успешный пустой ответ сниппетов ≠ ошибка: профиль загружен, ссылка неразрешена, выходы пусты
+    fake_panel["api"] = _panel_with_snippets(_WARP_ONLY, [])
+    out = await D._profiles_by_uuid(_Logger())
+    assert out["p1"]["outbounds"] == [] and out["p1"]["snippets_unresolved"] == ["warp"]
+    assert D._effective_outbounds(out["p1"], True) == []
+
+
+async def test_snippets_mixed_plain_and_snippet_outbounds(fake_panel):
+    profiles = [{"uuid": "p1", "name": "mixed", "config": {"outbounds": [
+        {"tag": "DIRECT", "protocol": "freedom"}, {"snippet": "warp"}, {"snippet": "missing"}, {"tag": "BLOCK", "protocol": "blackhole"},
+    ]}}]
+    fake_panel["api"] = _panel_with_snippets(profiles, _WARP_SNIPPET)
+    out = await D._profiles_by_uuid(_Logger())
+    assert [o["tag"] for o in out["p1"]["outbounds"]] == ["DIRECT", "warp-out", "BLOCK"]
+    assert out["p1"]["snippets_unresolved"] == ["missing"]
+
+
+def test_effective_outbounds_rules():
+    direct = [{"tag": "DIRECT", "protocol": "freedom"}]
+    assert D._effective_outbounds({}, False) == []                                   # профили не получены
+    assert D._effective_outbounds({}, True) == direct                                # у ноды нет профиля
+    assert D._effective_outbounds({"has_outbounds": False, "outbounds": []}, True) == direct   # профиль без выходов
+    assert D._effective_outbounds({"has_outbounds": True, "outbounds": []}, True) == []        # выходы были, ссылка не раскрылась
+    assert D._effective_outbounds({"has_outbounds": True, "outbounds": [{"tag": "x"}]}, True) == [{"tag": "x"}]
+    assert D._expand_snippets([{"snippet": "a"}, {"tag": "t"}], {}) == ([{"tag": "t"}], ["a"])
+
+
+# ── маршруты списков: тег выхода со спецсимволами ──
+
+def _app_with_router(monkeypatch, seen):
+    import sys
+    import types
+
+    from fastapi import FastAPI
+
+    class AdminUser:  # noqa: D401 — заглушка типа
+        pass
+
+    def require_permission(*_a, **_k):
+        async def dep():
+            return AdminUser()
+        return dep
+
+    api = types.ModuleType("web.backend.core.plugin_api")
+    api.auth_deps = lambda: (AdminUser, require_permission)
+    api.panel_api = lambda: None
+    for name in ("web", "web.backend", "web.backend.core"):
+        monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
+    monkeypatch.setitem(sys.modules, "web.backend.core.plugin_api", api)
+
+    async def fake_exit_users(ctx, tag):
+        seen.append(tag)
+        return None if tag == "ghost" else {"kind": "exit", "sink": {"tag": tag, "kind": "internet"}, "nodes": [], "by_nodes": True, "users": [], "count": 0}
+
+    monkeypatch.setattr(D, "exit_users", fake_exit_users)
+    from rwa_live_flow.routes import build_router
+    app = FastAPI()
+    app.include_router(build_router(types.SimpleNamespace(logger=_Logger(), db=None)))
+    return app
+
+
+def test_exit_users_route_accepts_special_tags(monkeypatch):
+    from fastapi.testclient import TestClient
+    from urllib.parse import quote
+
+    seen: list = []
+    client = TestClient(_app_with_router(monkeypatch, seen))
+    for tag in ["warp-out", 'exit"quoted', "back\\slash", "proxy/us", "узел-1"]:
+        r = client.get("/exit/users", params={"tag": tag})
+        assert r.status_code == 200, (tag, r.text)
+        assert r.headers["cache-control"] == "private, no-store"
+        assert r.json()["sink"]["tag"] == tag
+    assert seen == ["warp-out", 'exit"quoted', "back\\slash", "proxy/us", "узел-1"]
+    # прежний маршрут: тег без «/» работает, с «/» — 404 маршрутизации (поэтому UI ходит через ?tag=)
+    assert client.get("/exit/warp-out/users").status_code == 200
+    assert client.get("/exit/" + quote("proxy/us", safe="") + "/users").status_code == 404
+    assert client.get("/exit/users", params={"tag": "ghost"}).status_code == 404
+    assert client.get("/exit/users").status_code == 422
+    assert client.get("/exit/users", params={"tag": ""}).status_code == 422
+
+
+def test_module_js_special_tags_and_config_notes():
+    js = MODULE_JS
+    # выбор карточки — сравнением атрибута, а не подстановкой значения в селектор
+    assert "function byAttr(view, selector, attr, value)" in js and "byAttr(view, '.lf-sink', 'data-sink', id)" in js
+    assert "querySelector('.lf-sink[data-sink=" not in js
+    # тег выхода уходит query-параметром
+    assert "'/exit/users?tag=' + id" in js and "'/exit/' + id + '/users'" not in js
+    # состояние конфигурации выходов видно в легенде
+    assert "profilesStale" in js and "snippetsUnresolved" in js and "notes.join(' · ')" in js
+    # колонка групп — единым блоком, высота холста учитывает её нижний край всегда
+    assert "var groupTop = Math.max(TOP, centerY - colH / 2);" in js and "H = Math.max(H, groupTop + colH + 34, reach.y + 34);" in js
+    assert "if (hasPos()) { W = Math.max" not in js

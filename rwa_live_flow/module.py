@@ -40,6 +40,8 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       pCascade: 'Каскад через ', pExit: 'Выход ', pByNodes: 'по нодам: ', pByNodesNote: ' — какой аутбаунд xray выбрал для конкретного пользователя, панель не знает (это видно только в access.log ноды)',
       pnLabel: 'список: ', pnOver: 'поверх схемы', pnSide: 'рядом', pnHint: 'где открывать список «кто на ноде»: шторкой поверх схемы (схема не перестраивается) или рядом со схемой (масштаб схемы при этом не меняется, нажатая карточка остаётся на месте)',
       noProfiles: 'конфигурация выходов недоступна — выходы не показаны',
+      profilesStale: 'конфигурация выходов устарела: панель не отвечает, показан последний удачный набор',
+      snippetsUnresolved: 'сниппеты не раскрыты: ', snippetsUnresolvedB: ' — ветки из них не показаны',
       noteA: 'ветки ', noteB: ' есть в конфиге, но чисел по ним у панели нет',
       pUsers: 'Пользователи на ноде', pSeen: 'по панели активны ', pOf: ' · счётчик ноды ', pByPanel: ' (с пингами авто-выбора)', asOf: 'срез панели ',
       pEmptyA: 'по панели за последние ', pEmptyB: ' мин на этой ноде никто не был активен; счётчик ноды считает и пинги клиентов с авто-выбором серверов',
@@ -63,6 +65,8 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       pCascade: 'Cascade via ', pExit: 'Exit ', pByNodes: 'by nodes: ', pByNodesNote: ' — which outbound xray picked for a given user is unknown to the panel (only the node access.log knows)',
       pnLabel: 'list: ', pnOver: 'over the diagram', pnSide: 'beside', pnHint: 'where the “who is on the node” list opens: as a drawer over the diagram (the diagram is not re-laid out) or beside it (the diagram keeps its scale and the clicked card stays put)',
       noProfiles: 'exit config unavailable — exits are hidden',
+      profilesStale: 'exit config is stale: the panel is not responding, showing the last good set',
+      snippetsUnresolved: 'snippets not resolved: ', snippetsUnresolvedB: ' — their branches are hidden',
       noteA: 'branches ', noteB: ' exist in the config, but the panel has no numbers for them',
       pUsers: 'Users on the node', pSeen: 'active per panel ', pOf: ' · node counter ', pByPanel: ' (incl. auto-select probes)', asOf: 'panel snapshot ',
       pEmptyA: 'per panel nobody was active on this node in the last ', pEmptyB: ' min; the node counter also counts probes from clients with server auto-select',
@@ -396,14 +400,20 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     var H = Math.max(TOP + mainRows * STEP, hopTop + hopTotalH, sinkTop + sinkTotalH) + 34;
 
     var classes = buildClasses(d);
-    var boxGap = 18, colH = classes.length * userH + (classes.length - 1) * boxGap, top0 = centerY - colH / 2;
+    var boxGap = 18, colH = classes.length * userH + (classes.length - 1) * boxGap;
+    // Колонка групп — единый блок: центрируется по столбцу нод, но не выше верхнего
+    // края (интервалы между карточками сохраняются, карточки не наезжают друг на
+    // друга), а её нижний край всегда учитывается в высоте холста — на парке из
+    // 1–3 нод с четырьмя группами колонка выше столбца нод.
+    var groupTop = Math.max(TOP, centerY - colH / 2);
     classes.forEach(function (c, i) {
       var o = posOf('g:' + c.k);
       c.x = Math.max(8, userX + o.dx);
-      c.y = Math.max(TOP + userH / 2, top0 + i * (userH + boxGap) + userH / 2 + o.dy);
+      c.y = Math.max(TOP + userH / 2, groupTop + i * (userH + boxGap) + userH / 2 + o.dy);
       reach.x = Math.max(reach.x, c.x + userW); reach.y = Math.max(reach.y, c.y + userH / 2);
     });
-    if (hasPos()) { W = Math.max(W, reach.x + 30); H = Math.max(H, reach.y + 34); }
+    W = Math.max(W, reach.x + 30);
+    H = Math.max(H, groupTop + colH + 34, reach.y + 34);
 
     var s = svgOpen(W, H);
     s += '<text class="lf-cap" x="' + userX + '" y="18">' + t().capUsers + '</text>';
@@ -542,7 +552,8 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     });
     // высота — по самой длинной колонке: сетка с полосами, прыжки, выходы, группы
     var H = Math.max(bandBot + lanesBot * LANE, hopTop + hopTotalH, sinkTop + sinkTotalH, top0 + colH) + 34;
-    if (hasPos()) { W = Math.max(W, reach.x + 30); H = Math.max(H, reach.y + 34); }
+    W = Math.max(W, reach.x + 30);
+    H = Math.max(H, reach.y + 34);
 
     var s = svgOpen(W, H);
     s += '<text class="lf-cap" x="' + userX + '" y="18">' + t().capUsers + '</text>';
@@ -892,9 +903,16 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       + (d.poll_error === 'panel_timeout' ? t().pollTimeout : d.poll_error ? t().pollErr : '')
       + (d.poll_truncated ? ' · ' + t().pTrunc : '');
     var other = (d.sinks || []).filter(function (s) { return s.kind !== 'internet'; });
-    view.querySelector('.lf-note').textContent = d.profiles_available === false
-      ? t().noProfiles
-      : other.length ? t().noteA + other.map(function (sk) { return sinkTitle(sk, false); }).join(', ') + t().noteB : '';
+    // Состояние конфигурации выходов: недоступна (холодный старт без панели) /
+    // устарела (последний удачный набор) / сниппеты не раскрыты — всё видно в легенде.
+    var notes = [];
+    if (d.profiles_available === false) notes.push(t().noProfiles);
+    else {
+      if (d.profiles_stale) notes.push(t().profilesStale);
+      if ((d.snippets_unresolved || []).length) notes.push(t().snippetsUnresolved + d.snippets_unresolved.join(', ') + t().snippetsUnresolvedB);
+      if (other.length) notes.push(t().noteA + other.map(function (sk) { return sinkTitle(sk, false); }).join(', ') + t().noteB);
+    }
+    view.querySelector('.lf-note').textContent = notes.join(' · ');
     var lg = view.querySelectorAll('.lf-legend span');
     if (lg.length >= 3) {
       lg[0].innerHTML = '<i style="color:hsl(var(--primary, 239 84% 67%))"></i>' + t().lgLive;
@@ -1005,7 +1023,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     var k = key.slice(0, 2), id = encodeURIComponent(key.slice(2));
     return k === 'g:' ? API_BASE + '/group/' + id + '/users'
       : k === 'c:' ? API_BASE + '/cascade/' + id + '/users'
-      : k === 's:' ? API_BASE + '/exit/' + id + '/users'
+      : k === 's:' ? API_BASE + '/exit/users?tag=' + id     // тег — query-параметром: в пути «/» внутри тега не доходит до маршрута
       : API_BASE + '/node/' + id + '/users';
   }
   function groupTitle(k) { return k === 'mobile' ? t().mobBox : k === 'fixed' ? t().fixBox : k === 'cdn' ? t().cdnBox : k === 'unknown' ? t().unkBox : t().allBox; }
@@ -1032,13 +1050,20 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
   // Замок масштаба для режима «рядом»: пиксельный размер SVG до открытия списка
   // (без учёта пользовательского зума) и габариты схемы, к которым он относится.
   var fitLock = null;
+  // Поиск карточки по значению атрибута — без подстановки значения в селектор:
+  // тег выхода может содержать кавычки, обратную косую и что угодно ещё.
+  function byAttr(view, selector, attr, value) {
+    var els = view.querySelectorAll(selector);
+    for (var i = 0; i < els.length; i++) if (els[i].getAttribute(attr) === value) return els[i];
+    return null;
+  }
   function selEl(view, sel) {
     if (!sel) return null;
     var k = sel.slice(0, 2), id = sel.slice(2);
-    return k === 'g:' ? view.querySelector('.lf-grp[data-group="' + id + '"]')
-      : k === 'c:' ? view.querySelector('.lf-hop[data-hop="' + id + '"]')
-      : k === 's:' ? view.querySelector('.lf-sink[data-sink="' + id + '"]')
-      : view.querySelector('.lf-node[data-uuid="' + id + '"]');
+    return k === 'g:' ? byAttr(view, '.lf-grp', 'data-group', id)
+      : k === 'c:' ? byAttr(view, '.lf-hop', 'data-hop', id)
+      : k === 's:' ? byAttr(view, '.lf-sink', 'data-sink', id)
+      : byAttr(view, '.lf-node', 'data-uuid', id);
   }
   function selRect(view, sel) { var el = selEl(view, sel); return el ? el.getBoundingClientRect() : null; }
   function lockFit(view) {
@@ -1366,6 +1391,10 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
   }
 
   window.rwaPluginUI = window.rwaPluginUI || {};
-  window.rwaPluginUI[PLUGIN_ID] = { mount: mount, unmount: unmount };
+  window.rwaPluginUI[PLUGIN_ID] = {
+    mount: mount, unmount: unmount,
+    // Для тестов раскладки (tests/js): чистые функции рендера и настройки без DOM.
+    __internals: { renderSvg: renderSvg, renderGrid: renderGrid, buildClasses: buildClasses, prefs: prefs, GEO: GEO }
+  };
 })();
 """
