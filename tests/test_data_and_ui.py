@@ -514,3 +514,87 @@ def test_module_js_special_tags_and_config_notes():
     # колонка групп — единым блоком, высота холста учитывает её нижний край всегда
     assert "var groupTop = Math.max(TOP, centerY - colH / 2);" in js and "H = Math.max(H, groupTop + colH + 34, reach.y + 34);" in js
     assert "if (hasPos()) { W = Math.max" not in js
+
+
+# ── сниппеты через computed-config панели (0.17.3) ──
+
+def _panel_with_computed(profiles, computed, snippets=None, calls=None):
+    class Panel(_FakePanel):
+        async def get_config_profile_computed(self, uuid):
+            if calls is not None:
+                calls.append(uuid)
+            v = computed[uuid] if uuid in computed else computed.get("*")
+            if isinstance(v, Exception):
+                raise v
+            return {"response": {"uuid": uuid, "config": v}}
+    if snippets is not None:
+        async def get_snippets(self):
+            return {"response": {"total": len(snippets), "snippets": snippets}}
+        Panel.get_snippets = get_snippets
+    return Panel({"response": {"configProfiles": profiles}})
+
+
+_MIXED = [
+    {"uuid": "p1", "name": "with-refs", "config": {"outbounds": [{"tag": "DIRECT", "protocol": "freedom"}, {"snippet": "warp"}], "routing": {"rules": [{"snippet": "block-private"}]}}},
+    {"uuid": "p2", "name": "plain", "config": {"outbounds": [{"tag": "DIRECT", "protocol": "freedom"}, {"tag": "BLOCK", "protocol": "blackhole"}]}},
+]
+_P1_COMPUTED = {"outbounds": [{"tag": "DIRECT", "protocol": "freedom"}, {"tag": "warp-out", "protocol": "freedom", "settings": {}}, {"tag": "psiphon-out", "protocol": "socks", "settings": {"servers": [{"address": "127.0.0.1"}]}}], "routing": {"rules": []}}
+
+
+async def test_computed_config_expands_only_profiles_with_refs(fake_panel):
+    calls: list = []
+    fake_panel["api"] = _panel_with_computed(_MIXED, {"p1": _P1_COMPUTED}, calls=calls)
+    out = await D._profiles_by_uuid(_Logger())
+    assert calls == ["p1"]                                          # обычный профиль — без лишнего запроса
+    assert [o["tag"] for o in out["p1"]["outbounds"]] == ["DIRECT", "warp-out", "psiphon-out"]
+    assert out["p1"]["snippets_unresolved"] == [] and out["p1"]["has_outbounds"] is True
+    assert [o["tag"] for o in out["p2"]["outbounds"]] == ["DIRECT", "BLOCK"]
+    assert [o["addr"] for o in out["p1"]["outbounds"] if o["tag"] == "psiphon-out"] == ["127.0.0.1"]
+
+
+async def test_computed_config_accepts_json_string(fake_panel):
+    import json as _json
+    fake_panel["api"] = _panel_with_computed(_MIXED, {"p1": _json.dumps(_P1_COMPUTED)})
+    out = await D._profiles_by_uuid(_Logger())
+    assert [o["tag"] for o in out["p1"]["outbounds"]] == ["DIRECT", "warp-out", "psiphon-out"]
+
+
+async def test_computed_config_failure_keeps_last_good(fake_panel, monkeypatch):
+    monkeypatch.setattr(D, "PROFILES_TTL_S", 0.0)
+    D._profiles_cache.update(ts=0.0, data=None, stale=False, last_log=0.0)
+    fake_panel["api"] = _panel_with_computed(_MIXED, {"p1": _P1_COMPUTED})
+    data, stale = await D._profiles_cached(_Logger())
+    assert stale is False and "warp-out" in [o["tag"] for o in data["p1"]["outbounds"]]
+
+    fake_panel["api"] = _panel_with_computed(_MIXED, {"p1": RuntimeError("panel 502")})
+    data2, stale2 = await D._profiles_cached(_Logger())
+    assert stale2 is True and "warp-out" in [o["tag"] for o in data2["p1"]["outbounds"]]   # последний удачный, помечен stale
+
+    fake_panel["api"] = _panel_with_computed(_MIXED, {"p1": "{not json"})               # кривой ответ = сбой
+    data3, stale3 = await D._profiles_cached(_Logger())
+    assert stale3 is True and "warp-out" in [o["tag"] for o in data3["p1"]["outbounds"]]
+
+    fake_panel["api"] = _panel_with_computed(_MIXED, {"p1": _P1_COMPUTED})
+    data4, stale4 = await D._profiles_cached(_Logger())
+    assert stale4 is False
+
+
+async def test_computed_config_cold_start_failure(fake_panel, monkeypatch):
+    monkeypatch.setattr(D, "PROFILES_TTL_S", 0.0)
+    D._profiles_cache.update(ts=0.0, data=None, stale=False, last_log=0.0)
+    fake_panel["api"] = _panel_with_computed(_MIXED, {"p1": RuntimeError("panel down")})
+    assert await D._profiles_cached(_Logger()) == (None, False)
+
+
+async def test_computed_config_residual_ref_is_unresolved(fake_panel):
+    fake_panel["api"] = _panel_with_computed(_MIXED, {"p1": {"outbounds": [{"tag": "DIRECT", "protocol": "freedom"}, {"snippet": "ghost"}]}})
+    out = await D._profiles_by_uuid(_Logger())
+    assert [o["tag"] for o in out["p1"]["outbounds"]] == ["DIRECT"] and out["p1"]["snippets_unresolved"] == ["ghost"]
+
+
+async def test_snippets_fallback_when_client_has_no_computed_method(fake_panel):
+    # старая админка: метода computed-config нет, но есть get_snippets — раскрываем по именам
+    fake_panel["api"] = _panel_with_snippets(_MIXED, [{"name": "warp", "snippet": [{"tag": "warp-out", "protocol": "freedom"}]}])
+    assert not hasattr(fake_panel["api"], "get_config_profile_computed")
+    out = await D._profiles_by_uuid(_Logger())
+    assert [o["tag"] for o in out["p1"]["outbounds"]] == ["DIRECT", "warp-out"]

@@ -220,6 +220,46 @@ def _expand_snippets(items: list, snippets: dict[str, list]) -> tuple[list, list
     return out, unresolved
 
 
+_NO_COMPUTED = object()   # у клиента админки нет метода computed-config (старая версия)
+
+
+async def _computed_outbounds(logger, uuids: list[str], timeout: float | None = None, quiet: bool = False):
+    """Аутбаунды профилей с раскрытыми сниппетами: uuid → список.
+
+    ``GET /api/config-profiles/{uuid}/computed-config`` — панель сама
+    подставляет сниппеты везде (аутбаунды, правила, балансеры, вложенные) и
+    ровно так, как отдаёт конфиг ноде. Один запрос на профиль со ссылками.
+    ``_NO_COMPUTED`` — метода у клиента нет; ``None`` — какой-то из запросов
+    упал или ответ не той формы (набор профилей считается незагруженным)."""
+    import asyncio
+
+    from web.backend.core.plugin_api import panel_api
+
+    api = panel_api()
+    if not hasattr(api, "get_config_profile_computed"):
+        return _NO_COMPUTED
+
+    async def one(uuid: str) -> list:
+        coro = api.get_config_profile_computed(uuid)
+        resp = await (asyncio.wait_for(coro, timeout=timeout) if timeout else coro)
+        body = resp.get("response") if isinstance(resp, dict) else None
+        cfg = body.get("config") if isinstance(body, dict) else None
+        if isinstance(cfg, str):
+            cfg = json.loads(cfg)
+        if not isinstance(cfg, dict):
+            raise ValueError("computed-config: unexpected shape")
+        outs = cfg.get("outbounds")
+        return outs if isinstance(outs, list) else []
+
+    try:
+        results = await asyncio.gather(*(one(u) for u in uuids))
+    except Exception:  # noqa: BLE001
+        if not quiet:
+            logger.exception("live_flow: computed-config request failed")
+        return None
+    return dict(zip(uuids, results, strict=True))
+
+
 async def _profiles_by_uuid(logger, timeout: float | None = None, quiet: bool = False) -> dict[str, dict] | None:
     """Конфиг-профили панели: uuid → имя, инбаунды, аутбаунды. None — запрос упал."""
     import asyncio
@@ -250,27 +290,36 @@ async def _profiles_by_uuid(logger, timeout: float | None = None, quiet: bool = 
             except ValueError:
                 cfg = {}
         parsed.append((p, cfg if isinstance(cfg, dict) else {}))
-    # Сниппеты нужны только профилям со ссылками. Если такие есть, а запрос
-    # сниппетов упал — набор профилей считается незагруженным целиком: иначе
-    # ссылки исчезли бы, а пустой список выходов лёг бы в кэш как «удачный».
+    # Профили со ссылками на сниппеты берём у панели уже раскрытыми
+    # (computed-config, один запрос на такой профиль; обычные профили — без
+    # лишнего запроса). У старой админки без этого метода — запасной путь:
+    # сниппеты по именам. Сбой любого запроса — набор профилей не загружен
+    # целиком (None): иначе ссылки исчезли бы, а пустой список выходов лёг бы
+    # в кэш как «удачный».
     raw_outs = {
         str(p["uuid"]): (cfg.get("outbounds") if isinstance(cfg.get("outbounds"), list) else [])
         for p, cfg in parsed
     }
-    needs_snippets = any(_snippet_refs(o) for o in raw_outs.values())
+    ref_uuids = [u for u, o in raw_outs.items() if _snippet_refs(o)]
+    computed: dict[str, list] = {}
     snippets: dict[str, list] = {}
-    if needs_snippets:
-        got = await _snippets_by_name(logger, timeout=timeout, quiet=quiet)
+    if ref_uuids:
+        got = await _computed_outbounds(logger, ref_uuids, timeout=timeout, quiet=quiet)
         if got is None:
             return None
-        snippets = got
+        if got is _NO_COMPUTED:
+            sn = await _snippets_by_name(logger, timeout=timeout, quiet=quiet)
+            if sn is None:
+                return None
+            snippets = sn
+        else:
+            computed = got
     out: dict[str, dict] = {}
     for p, cfg in parsed:
-        # Один кривой профиль не должен ронять схему: всё, что не той формы, пропускаем.
-        if not isinstance(p, dict) or not p.get("uuid"):
-            continue
-        raw = raw_outs[str(p["uuid"])]
-        outs, unresolved = _expand_snippets(raw, snippets)
+        uuid = str(p["uuid"])
+        raw = raw_outs[uuid]
+        # в раскрытом конфиге ссылок остаться не должно; если остались — они неразрешённые
+        outs, unresolved = _expand_snippets(computed[uuid], {}) if uuid in computed else _expand_snippets(raw, snippets)
         ins = cfg.get("inbounds") if isinstance(cfg.get("inbounds"), list) else []
         out[str(p.get("uuid"))] = {
             "name": p.get("name"),
