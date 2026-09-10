@@ -47,6 +47,83 @@ def _outbound_addr(o: dict) -> str | None:
     return None
 
 
+RESOLVE_TTL_S = 600.0        # DNS-ответы для матчинга каскадов: адреса нод меняются редко
+RESOLVE_FAIL_TTL_S = 60.0    # неудачу помним недолго, чтобы не залипнуть на сбое DNS
+RESOLVE_TIMEOUT_S = 2.0
+_resolve_cache: dict[str, tuple[float, frozenset[str]]] = {}
+
+
+def _norm_host(h) -> str:
+    return str(h or "").strip().lower().rstrip(".").strip("[]")
+
+
+def _ip_literal(host: str) -> str | None:
+    import ipaddress
+
+    try:
+        return str(ipaddress.ip_address(_norm_host(host)))
+    except ValueError:
+        return None
+
+
+async def _resolve_hosts(hosts) -> dict[str, frozenset[str]]:
+    """host → множество его IP. IP-литерал резолвится сам в себя, неудача —
+    пустое множество (кэш короче). Никогда не бросает: каскад — украшение
+    схемы, а не повод её уронить."""
+    import asyncio
+    import socket
+    import time as _time
+
+    now = _time.time()
+    out: dict[str, frozenset[str]] = {}
+    todo: list[str] = []
+    for h in {_norm_host(x) for x in hosts if x}:
+        if not h:
+            continue
+        lit = _ip_literal(h)
+        if lit:
+            out[h] = frozenset({lit})
+            continue
+        hit = _resolve_cache.get(h)
+        if hit and now < hit[0]:
+            out[h] = hit[1]
+        else:
+            todo.append(h)
+    if todo:
+        loop = asyncio.get_running_loop()
+
+        async def one(h: str) -> None:
+            try:
+                infos = await asyncio.wait_for(loop.getaddrinfo(h, None, type=socket.SOCK_STREAM), RESOLVE_TIMEOUT_S)
+                ips = frozenset(ip for ip in (_ip_literal(i[4][0]) for i in infos if i and i[4]) if ip)
+            except Exception:  # noqa: BLE001
+                ips = frozenset()
+            _resolve_cache[h] = (now + (RESOLVE_TTL_S if ips else RESOLVE_FAIL_TTL_S), ips)
+            out[h] = ips
+
+        await asyncio.gather(*(one(h) for h in todo))
+    return out
+
+
+def _cascade_target(addr, own_uuid: str, addr_to_uuid: dict[str, str], resolved: dict[str, frozenset[str]]) -> str | None:
+    """uuid нашей ноды, на которую ведёт аутбаунд, или None.
+
+    Сначала строка к строке (домен = домен), затем IP: после переезда доменов
+    адрес ноды в панели может быть IP, а аутбаунд — доменом (или наоборот), и
+    строки уже не совпадают. Аутбаунд на саму себя каскадом не считается.
+    """
+    a = _norm_host(addr)
+    if not a:
+        return None
+    hit = addr_to_uuid.get(a)
+    if hit is None:
+        for ip in resolved.get(a) or ():
+            hit = addr_to_uuid.get(ip)
+            if hit:
+                break
+    return hit if hit and hit != own_uuid else None
+
+
 PROFILES_TTL_S = 60.0          # /data дёргает каждая вкладка раз в 5 с — профили столько не меняются
 PROFILES_TIMEOUT_S = 15.0
 PROFILES_LOG_EVERY_S = 300.0   # ошибку запроса логируем не чаще раза в 5 минут
@@ -75,6 +152,53 @@ async def _profiles_cached(logger) -> tuple[dict[str, dict] | None, bool]:
     return c["data"], c["stale"]
 
 
+async def _snippets_by_name(logger, timeout: float | None = None, quiet: bool = False) -> dict[str, list]:
+    """Сниппеты панели: имя → содержимое (список аутбаундов или правил).
+
+    В конфиг-профиле сниппет лежит нераскрытой ссылкой ``{"snippet": "имя"}``
+    (панель подставляет его только при сборке конфига ноды), поэтому WARP,
+    вынесенный в сниппет, без этого на схеме не появлялся. Ошибка запроса —
+    пустая карта: схема рисуется без сниппетных выходов, а не падает."""
+    import asyncio
+
+    from web.backend.core.plugin_api import panel_api
+
+    api = panel_api()
+    if not hasattr(api, "get_snippets"):
+        return {}
+    try:
+        coro = api.get_snippets()
+        resp = await (asyncio.wait_for(coro, timeout=timeout) if timeout else coro)
+    except Exception:  # noqa: BLE001
+        if not quiet:
+            logger.exception("live_flow: snippets request failed")
+        return {}
+    body = resp.get("response") if isinstance(resp, dict) else None
+    items = body.get("snippets") if isinstance(body, dict) else None
+    out: dict[str, list] = {}
+    for s in items if isinstance(items, list) else []:
+        if not isinstance(s, dict) or not s.get("name"):
+            continue
+        content = s.get("snippet")
+        if isinstance(content, dict):
+            content = [content]
+        if isinstance(content, list):
+            out[str(s["name"])] = [c for c in content if isinstance(c, dict)]
+    return out
+
+
+def _expand_snippets(items: list, snippets: dict[str, list]) -> list:
+    """Заменяет ссылки ``{"snippet": "имя"}`` содержимым сниппета (один уровень:
+    сниппет внутри сниппета панель не поддерживает). Неизвестное имя — пропуск."""
+    out: list = []
+    for o in items:
+        if isinstance(o, dict) and "snippet" in o and not o.get("tag"):
+            out.extend(snippets.get(str(o.get("snippet")), []))
+        else:
+            out.append(o)
+    return out
+
+
 async def _profiles_by_uuid(logger, timeout: float | None = None, quiet: bool = False) -> dict[str, dict] | None:
     """Конфиг-профили панели: uuid → имя, инбаунды, аутбаунды. None — запрос упал."""
     import asyncio
@@ -93,6 +217,7 @@ async def _profiles_by_uuid(logger, timeout: float | None = None, quiet: bool = 
     items = body.get("configProfiles") if isinstance(body, dict) else None
     if not isinstance(items, list):
         items = []
+    snippets = await _snippets_by_name(logger, timeout=timeout, quiet=quiet)
     out: dict[str, dict] = {}
     for p in items:
         # Один кривой профиль не должен ронять схему: всё, что не той формы, пропускаем.
@@ -106,7 +231,7 @@ async def _profiles_by_uuid(logger, timeout: float | None = None, quiet: bool = 
                 cfg = {}
         if not isinstance(cfg, dict):
             cfg = {}
-        outs = cfg.get("outbounds") if isinstance(cfg.get("outbounds"), list) else []
+        outs = _expand_snippets(cfg.get("outbounds") if isinstance(cfg.get("outbounds"), list) else [], snippets)
         ins = cfg.get("inbounds") if isinstance(cfg.get("inbounds"), list) else []
         out[str(p.get("uuid"))] = {
             "name": p.get("name"),
@@ -116,8 +241,31 @@ async def _profiles_by_uuid(logger, timeout: float | None = None, quiet: bool = 
                 if isinstance(o, dict) and o.get("tag")
             ],
             "inbounds": [str(i.get("tag")) for i in ins if isinstance(i, dict) and i.get("tag")],
+            "cdn_inbounds": [str(i.get("tag")) for i in ins if isinstance(i, dict) and i.get("tag") and _inbound_behind_cdn(i)],
         }
     return out
+
+
+# HTTP-транспорты, которые можно проксировать через CDN. Reality сквозь CDN не
+# ходит, значит такой инбаунд принимает клиента напрямую.
+_CDN_NETWORKS = frozenset({"ws", "websocket", "xhttp", "splithttp", "httpupgrade", "grpc", "h2", "http"})
+
+
+def _inbound_behind_cdn(ib: dict) -> bool:
+    """Инбаунд за CDN/обратным прокси. Одного HTTP-транспорта мало (xhttp/ws с TLS
+    могут торчать в интернет напрямую — ложное срабатывание у тех, кто CDN не
+    настраивал), поэтому нужен явный признак прокси перед Xray: либо security none
+    (голый HTTP-транспорт наружу не выставляют — TLS терминирует прокси), либо
+    sockopt.trustedXForwardedFor (его ставят только осознанно под CDN)."""
+    ss = ib.get("streamSettings") if isinstance(ib.get("streamSettings"), dict) else {}
+    net = str(ss.get("network") or "tcp").lower()
+    sec = str(ss.get("security") or "none").lower()
+    so = ss.get("sockopt") if isinstance(ss.get("sockopt"), dict) else {}
+    return net in _CDN_NETWORKS and sec != "reality" and (sec == "none" or bool(so.get("trustedXForwardedFor")))
+
+
+def _cdn_tags(profiles: dict | None) -> set[str]:
+    return {t for p in (profiles or {}).values() for t in (p.get("cdn_inbounds") or [])}
 
 
 def _profile_uuid(raw: Any) -> str | None:
@@ -187,7 +335,7 @@ async def collect(ctx) -> dict:
 
     live = POLLER.fresh
     split: dict[str, dict] = {}
-    total_split = {"mobile": 0.0, "fixed": 0.0, "unknown": 0.0, "mobile_users": 0, "fixed_users": 0, "unknown_users": 0}
+    total_split = {"mobile": 0.0, "fixed": 0.0, "cdn": 0.0, "unknown": 0.0, "mobile_users": 0, "fixed_users": 0, "cdn_users": 0, "unknown_users": 0}
     if live:
         active = POLLER.active_by_node()
         active_as_of = POLLER.online_ref_iso()
@@ -219,12 +367,22 @@ async def collect(ctx) -> dict:
     profiles, profiles_stale = await _profiles_cached(ctx.logger)
     profiles_available = profiles is not None
 
-    # адрес ноды (домен) → uuid: по нему ловим каскад (аутбаунд на нашу же ноду)
-    addr_to_uuid = {
-        str(r["address"]).strip().lower(): r["uuid"]
-        for r in rows
-        if r["address"]
-    }
+    # адрес ноды → uuid: по нему ловим каскад (аутбаунд на нашу же ноду).
+    # Карта держит и строку адреса, и его IP после резолва — аутбаунды тоже
+    # резолвим, чтобы «домен ↔ IP» совпадали (см. _cascade_target).
+    chain_addrs = [
+        o.get("addr") for p in (profiles or {}).values() for o in (p.get("outbounds") or [])
+        if o.get("addr") and o.get("protocol") in _CHAIN_PROTOCOLS
+    ]
+    resolved = await _resolve_hosts([r["address"] for r in rows if r["address"]] + chain_addrs)
+    addr_to_uuid: dict[str, str] = {}
+    for r in rows:
+        a = _norm_host(r["address"])
+        if not a:
+            continue
+        addr_to_uuid.setdefault(a, r["uuid"])
+        for ip in resolved.get(a) or ():
+            addr_to_uuid.setdefault(ip, r["uuid"])
 
     sinks: dict[str, dict] = {}
     nodes: list[dict] = []
@@ -243,19 +401,18 @@ async def collect(ctx) -> dict:
         for outbound in outbounds:
             tag = outbound["tag"]
             proto = outbound["protocol"]
-            addr = (outbound.get("addr") or "").strip().lower()
             # Каскад: аутбаунд-цепочка, ведущая на другую НАШУ ноду. Это не выход,
             # а прыжок — рисуем ребром нода→нода, в список выходов не кладём.
-            if proto in _CHAIN_PROTOCOLS and addr in addr_to_uuid and addr_to_uuid[addr] != row["uuid"]:
-                target = addr_to_uuid[addr]
+            target = _cascade_target(outbound.get("addr"), row["uuid"], addr_to_uuid, resolved) if proto in _CHAIN_PROTOCOLS else None
+            if target:
                 if target not in cascades:
                     cascades.append(target)
                 continue
             kind = _SINK_KIND.get(proto, "chain")
-            sinks.setdefault(
-                tag,
-                {"tag": tag, "title": _SINK_TITLES.get(tag, tag), "kind": kind},
-            )
+            sink = {"tag": tag, "title": _SINK_TITLES.get(tag, tag), "kind": kind}
+            if kind == "chain" and outbound.get("addr"):
+                sink["addr"] = _norm_host(outbound.get("addr"))   # цепочка на чужой сервер — куда именно
+            sinks.setdefault(tag, sink)
             node_sinks.append(tag)
 
         nodes.append(
@@ -394,6 +551,7 @@ async def _node_users_db(ctx, node, node_uuid: str) -> dict:
                 "mobile": bool(r["is_mobile"]) if r["is_mobile"] is not None else None,
                 "hosting": bool(r["is_hosting"] or r["is_vpn"] or r["is_proxy"]),
                 "inbound": r["inbound"],
+                "cdn": r["inbound"] in _cdn_tags(_profiles_cache.get("data")),  # маршрут через CDN/прокси — метка в строке
                 # «активен»: onlineAt панели; «since» оставлено для UI-совместимости
                 "since": r["online_at"].isoformat() if r["online_at"] else None,
                 "ip_since": r["connected_at"].isoformat() if r["connected_at"] else None,
@@ -409,13 +567,44 @@ async def _node_users_db(ctx, node, node_uuid: str) -> dict:
     }
 
 
-def _net_class(is_mobile, connection_type) -> str:
-    """mobile | fixed | unknown по ip_metadata (is_mobile / connection_type)."""
-    if is_mobile is True or (connection_type or "").lower() == "mobile":
+# connection_type, за которым не видно реального клиента: нода за CDN/прокси
+# видит IP Cloudflare и т. п. — это не «Wi-Fi/LAN», а «неизвестно» с причиной cdn.
+_HOSTING_TYPES = frozenset({"datacenter", "hosting", "vpn", "proxy", "cdn", "tor"})
+
+
+def _net_class(is_mobile, connection_type, hosting: bool = False) -> str:
+    """mobile | fixed | unknown по ip_metadata (is_mobile / connection_type / is_hosting)."""
+    ct = (connection_type or "").lower()
+    if hosting or ct in _HOSTING_TYPES:
+        return "unknown"
+    if is_mobile is True or ct == "mobile":
         return "mobile"
     if is_mobile is False or connection_type:
         return "fixed"
     return "unknown"
+
+
+def _is_local_ip(ip) -> bool:
+    """127.0.0.1 / 10.x / fd00:: — Xray за локальным прокси, клиента не видит."""
+    import ipaddress
+    try:
+        a = ipaddress.ip_address(str(ip).split("/")[0])
+    except ValueError:
+        return False
+    return a.is_loopback or a.is_private or a.is_link_local
+
+
+def _unknown_why(has_conn: bool, has_meta: bool, via_cdn: bool = False) -> str:
+    """Причина «неизвестно»: cdn (подключение пришло через инбаунд за CDN/прокси или
+    с хостингового/локального IP — нода не видит клиента, см. README) | no_conn
+    (агент ноды не сообщил IP) | no_meta (IP ещё не обогащён GeoIP)."""
+    if via_cdn:
+        return "cdn"
+    return "no_conn" if not has_conn else "no_meta" if not has_meta else "cdn"
+
+
+UNKNOWN_WHY = ("no_conn", "no_meta", "cdn")
+_cls_why: dict[str, str] = {}  # id панели → причина, только для класса unknown
 
 
 CLASSIFY_TTL_S = 45.0
@@ -453,10 +642,13 @@ async def _classify_users_db(ctx, ids_str: list) -> dict[str, str]:
     try:
         rows = await ctx.db.fetch(
             """
-            SELECT u.id, m.is_mobile, m.connection_type
+            SELECT u.id, m.is_mobile, m.connection_type,
+                   (m.is_hosting OR m.is_vpn OR m.is_proxy OR m.is_tor) AS hosting,
+                   c.ip_address IS NOT NULL AS has_conn, m.ip_address IS NOT NULL AS has_meta,
+                   c.ip_address::text AS ip, c.device_info->>'inbound_tag' AS inbound
             FROM users u
             LEFT JOIN LATERAL (
-                SELECT c.ip_address FROM user_connections c
+                SELECT c.ip_address, c.device_info FROM user_connections c
                 WHERE c.user_uuid = u.uuid
                   AND (c.disconnected_at IS NULL OR c.connected_at > now() - interval '10 minutes')
                 ORDER BY c.connected_at DESC LIMIT 1
@@ -466,10 +658,25 @@ async def _classify_users_db(ctx, ids_str: list) -> dict[str, str]:
             """,
             ids,
         )
+        cdn_tags = _cdn_tags(_profiles_cache.get("data"))
         for r in rows:
-            cls[str(r["id"])] = _net_class(r["is_mobile"], r["connection_type"])
+            # 127.0.0.1 — Xray за локальным прокси без проброса заголовков: клиента не видно.
+            # Если прокси пробрасывает X-Forwarded-For, IP настоящий и GeoIP решает как обычно;
+            # тег CDN-инбаунда тогда лишь подсказывает причину, когда класс всё равно unknown.
+            local = _is_local_ip(r["ip"])
+            # По слову владельца: трафик, пришедший через инбаунд за CDN, — отдельная группа «CDN»
+            # (маршрут приёма важнее типа сети клиента). 127.0.0.1 без тега — «неизвестно».
+            if r["inbound"] in cdn_tags:
+                k = cls[str(r["id"])] = "cdn"
+            else:
+                k = cls[str(r["id"])] = "unknown" if local else _net_class(r["is_mobile"], r["connection_type"], bool(r["hosting"]))
+            if k == "unknown":
+                _cls_why[str(r["id"])] = _unknown_why(bool(r["has_conn"]), bool(r["has_meta"]), local)
+            else:
+                _cls_why.pop(str(r["id"]), None)
         for u in ids_str:
             cls.setdefault(str(u), "unknown")
+            _cls_why.setdefault(str(u), "no_conn")
     except Exception:  # noqa: BLE001 — деление не важнее схемы
         ctx.logger.exception("live_flow: classify users query failed")
     return cls
@@ -485,12 +692,13 @@ async def _vpn_split(ctx, poller) -> tuple[dict[str, dict], dict]:
     """
     act = poller.active_users()
     if not act:
-        return {}, {"mobile": 0.0, "fixed": 0.0, "unknown": 0.0, "mobile_users": 0, "fixed_users": 0, "unknown_users": 0}
+        return {}, {"mobile": 0.0, "fixed": 0.0, "cdn": 0.0, "unknown": 0.0, "mobile_users": 0, "fixed_users": 0, "cdn_users": 0, "unknown_users": 0}
     cls = await _classify_users(ctx, [uid for uid, _ in act])
     def blank():
-        return {"mobile": 0.0, "fixed": 0.0, "unknown": 0.0, "mobile_users": 0, "fixed_users": 0, "unknown_users": 0}
+        return {"mobile": 0.0, "fixed": 0.0, "cdn": 0.0, "unknown": 0.0, "mobile_users": 0, "fixed_users": 0, "cdn_users": 0, "unknown_users": 0}
     per_node: dict[str, dict] = {}
     total = blank()
+    why = dict.fromkeys(UNKNOWN_WHY, 0)
     for uid, u in act:
         nu = u.get("node_uuid")
         k = cls.get(str(uid), "unknown")
@@ -498,13 +706,17 @@ async def _vpn_split(ctx, poller) -> tuple[dict[str, dict], dict]:
         mbps = bps * 8 / 1e6
         total[k] += mbps
         total[k + "_users"] += 1
+        if k == "unknown":
+            why[_cls_why.get(str(uid), "no_conn")] += 1
         if nu:
             d = per_node.setdefault(nu, blank())
             d[k] += mbps
             d[k + "_users"] += 1
     for d in list(per_node.values()) + [total]:
-        for k in ("mobile", "fixed", "unknown"):
+        for k in ("mobile", "fixed", "cdn", "unknown"):
             d[k] = round(d[k], 2)
+    if total["unknown_users"]:
+        total["unknown_why"] = why  # почему «неизвестно» — подсказка в карточке группы
     return per_node, total
 
 
@@ -561,7 +773,7 @@ async def _users_rows(ctx, poller, live_users: list, with_node: bool = False) ->
                 ip=r["ip_address"], asn=r["asn"], as_name=r["asn_org"], country=r["country_code"], city=r["city"],
                 mobile=(bool(r["is_mobile"]) if r["is_mobile"] is not None else None),
                 hosting=bool(r["is_hosting"] or r["is_vpn"] or r["is_proxy"]),
-                inbound=r["inbound"],
+                inbound=r["inbound"], cdn=r["inbound"] in _cdn_tags(_profiles_cache.get("data")),
                 ip_since=r["connected_at"].isoformat() if r["connected_at"] else None,
             ))
     return users
@@ -582,7 +794,56 @@ async def _node_users_live(ctx, node, node_uuid: str, poller) -> dict:
     }
 
 
-GROUPS = ("mobile", "fixed", "unknown", "all")
+async def _nodes_users(ctx, node_uuids: set[str], payload: dict) -> dict:
+    """Сводный список активных на наборе нод (панель live); без опроса — пустой."""
+    from .poller import POLLER
+
+    if not POLLER.fresh:
+        payload.update(users=[], count=0, window_s=int(ONLINE_WINDOW_S), as_of=None, source="db-sync", unavailable=True)
+        return payload
+    chosen = [(uid, u) for uid, u in POLLER.active_users() if u.get("node_uuid") in node_uuids]
+    users = await _users_rows(ctx, POLLER, chosen, with_node=True)
+    mbps = sum((POLLER.user_bps(uid) or 0.0) * 8 / 1e6 for uid, _ in chosen)
+    payload.update(
+        users=users, count=len(chosen), truncated=bool(POLLER.truncated), vpn_mbps=round(mbps, 2),
+        window_s=int(ONLINE_WINDOW_S), as_of=POLLER.online_ref_iso(), source="panel-live",
+    )
+    return payload
+
+
+async def cascade_users(ctx, target_uuid: str) -> dict | None:
+    """Кто сейчас на нодах, каскадящих на ноду-цель. None — такой цели нет.
+
+    Какой аутбаунд xray выбрал для конкретного юзера, панель не знает (это
+    живёт только в access.log ноды), поэтому список — активные на
+    нодах-источниках, с пометкой ``by_nodes``.
+    """
+    d = await collect(ctx)
+    src = [n for n in d["nodes"] if target_uuid in (n.get("cascades") or [])]
+    if not src:
+        return None
+    target = next((n for n in d["nodes"] if n["uuid"] == target_uuid), None)
+    payload = {
+        "kind": "cascade",
+        "target": {"uuid": target_uuid, "name": (target or {}).get("name") or target_uuid},
+        "nodes": [n["name"] for n in src],
+        "by_nodes": True,
+    }
+    return await _nodes_users(ctx, {n["uuid"] for n in src}, payload)
+
+
+async def exit_users(ctx, tag: str) -> dict | None:
+    """Кто сейчас на нодах, у которых есть этот выход. None — выхода нет."""
+    d = await collect(ctx)
+    sink = next((s for s in d["sinks"] if s["tag"] == tag), None)
+    if sink is None:
+        return None
+    src = [n for n in d["nodes"] if tag in (n.get("sinks") or [])]
+    payload = {"kind": "exit", "sink": sink, "nodes": [n["name"] for n in src], "by_nodes": True}
+    return await _nodes_users(ctx, {n["uuid"] for n in src}, payload)
+
+
+GROUPS = ("mobile", "fixed", "cdn", "unknown", "all")
 
 
 async def group_users(ctx, group: str) -> dict:

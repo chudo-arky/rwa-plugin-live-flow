@@ -30,7 +30,7 @@ def build_router(ctx):
 
     from web.backend.core.plugin_api import auth_deps
 
-    from .data import GROUPS, collect, group_users, node_users
+    from .data import GROUPS, cascade_users, collect, exit_users, group_users, node_users
     from .module import MODULE_JS
     from .page import APP_JS, PAGE_HTML
 
@@ -69,7 +69,31 @@ def build_router(ctx):
             raise HTTPException(status_code=404, detail={"code": "node_not_found"})
         return _json(data)
 
-    @router.get("/group/{group}/users", summary="Сводный список активных по типу сети: mobile | fixed | unknown | all (live_flow:view_users)")
+    @router.get("/cascade/{node_uuid}/users", summary="Кто сейчас на нодах, каскадящих на эту ноду (live_flow:view_users)")
+    async def cascade_users_route(
+        node_uuid: str,
+        _admin: AdminUser = Depends(require_permission("live_flow", "view_users")),
+    ):
+        if not _UUID_RE.match(node_uuid):
+            raise HTTPException(status_code=422, detail={"code": "bad_uuid"})
+        data = await cascade_users(ctx, node_uuid)
+        if data is None:
+            raise HTTPException(status_code=404, detail={"code": "cascade_not_found"})
+        return _json(data)
+
+    @router.get("/exit/{tag}/users", summary="Кто сейчас на нодах с этим выходом (live_flow:view_users)")
+    async def exit_users_route(
+        tag: str,
+        _admin: AdminUser = Depends(require_permission("live_flow", "view_users")),
+    ):
+        if not tag or len(tag) > 100:
+            raise HTTPException(status_code=422, detail={"code": "bad_tag"})
+        data = await exit_users(ctx, tag)
+        if data is None:
+            raise HTTPException(status_code=404, detail={"code": "exit_not_found"})
+        return _json(data)
+
+    @router.get("/group/{group}/users", summary="Сводный список активных по типу сети: mobile | fixed | cdn | unknown | all (live_flow:view_users)")
     async def group_users_route(
         group: str,
         _admin: AdminUser = Depends(require_permission("live_flow", "view_users")),
@@ -96,6 +120,6 @@ def build_router(ctx):
     ):
         # Без расширения .js — иначе перехватит статик-локация nginx фронта.
         # Авторизация — кукой rw_access: <script src> того же origin её шлёт.
-        return Response(MODULE_JS, media_type="application/javascript; charset=utf-8")
+        return Response(MODULE_JS, media_type="application/javascript; charset=utf-8", headers=_NO_STORE)  # чтобы после обновления wheel браузер не держал старый модуль
 
     return router

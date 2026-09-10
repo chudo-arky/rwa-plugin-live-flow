@@ -29,36 +29,46 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       now: 'Сейчас в сети', loading: 'загрузка…', updated: 'обновлено ', nodata: 'нет данных: ',
       online: ' онлайн', nodesCnt: ' нод',
       capUsers: 'ПОЛЬЗОВАТЕЛИ', capNodes: 'НОДЫ', capCascade: 'КАСКАД', capExit: 'ВЫХОД',
-      users: 'Пользователи', noUsers: 'нет пользователей', mbps: ' Мбит/с', ppl: ' чел.', active: ' активных', activeTip: 'активных по панели', vpn: 'VPN ⇅ ', net: 'сеть хоста', liveSrc: 'панель live', dbSrc: 'синк БД (до 5 мин)', mob: 'мобильный', fix: 'Wi-Fi/LAN', unk: 'сеть неизвестна', lgSplit: 'линии от групп слева: ', mobBox: 'Мобильная сеть', fixBox: 'Wi-Fi / LAN', unkBox: 'Сеть неизвестна', allBox: 'Пользователи', zIn: 'приблизить', zOut: 'отдалить', zReset: 'сбросить масштаб', fSearch: 'поиск по имени ноды…', fActive: 'только активные', fTraffic: 'только с трафиком', vColumn: 'столбец', vGrid: 'колонки', shown: 'показано ', ofN: ' из ', pgPrev: 'предыдущая страница', pgNext: 'следующая страница', pgOf: ' из ', noMatch: 'по фильтру нод нет — измените поиск или снимите галочки', zHint: 'колесо мыши — масштаб (длинная схема листается колесом, масштаб — с Ctrl/⌘), перетаскивание — сдвиг', thNode: 'Нода', pGroup: 'Активные: ', pNoLive: 'живого опроса панели сейчас нет — сводный список по группам недоступен', pTrunc: 'срез панели неполный (юзеров больше лимита опроса)', pollErr: ' · опрос панели: ошибка', pollTimeout: ' · опрос панели: таймаут',
+      users: 'Пользователи', noUsers: 'нет пользователей', mbps: ' Мбит/с', ppl: ' чел.', active: ' активных', activeTip: 'активных по панели', vpn: 'VPN ⇅ ', net: 'сеть хоста', liveSrc: 'панель live', dbSrc: 'синк БД (до 5 мин)', mob: 'мобильный', fix: 'Wi-Fi/LAN', unk: 'сеть неизвестна', lgSplit: 'линии от групп слева: ', mobBox: 'Мобильная сеть', fixBox: 'Wi-Fi / LAN', cdnBox: 'Через CDN', cdnL: 'через CDN', unkBox: 'Сеть неизвестна', whyNoConn: 'агент ноды не сообщил IP', whyNoMeta: 'IP ещё без GeoIP', whyCdn: 'за CDN/прокси — нода не видит клиента, нужен trustedXForwardedFor (см. README)', allBox: 'Пользователи', zIn: 'приблизить', zOut: 'отдалить', zReset: 'сбросить масштаб', fSearch: 'поиск по имени ноды…', fActive: 'только активные', fTraffic: 'только с трафиком', vColumn: 'столбец', vGrid: 'колонки', shown: 'показано ', ofN: ' из ', pgPrev: 'предыдущая страница', pgNext: 'следующая страница', pgOf: ' из ', noMatch: 'по фильтру нод нет — измените поиск или снимите галочки', zHint: 'колесо мыши — масштаб (длинная схема листается колесом, масштаб — с Ctrl/⌘), перетаскивание — сдвиг', thNode: 'Нода', pGroup: 'Активные: ', pNoLive: 'живого опроса панели сейчас нет — сводный список по группам недоступен', pTrunc: 'срез панели неполный (юзеров больше лимита опроса)', pollErr: ' · опрос панели: ошибка', pollTimeout: ' · опрос панели: таймаут',
       internet: 'Интернет', blocked: 'Блокировка', toNet: 'выход в сеть', noMeasure: 'нет измерений',
       lgLive: 'идёт VPN-трафик (счётчики xray панели) — пунктир бежит', lgIdle: 'подключены, но молчат',
       lgBadge: 'в карточке ноды справа: реально активных по панели · счётчик ноды (с пингами авто-выбора)',
       offline: 'нет связи с нодой', profile: 'профиль', inbounds: 'инбаунды',
+      tipCascTo: 'каскад → ', tipCascFrom: 'принимает каскад от ', lgCasc: 'каскад: нода → прыжок через ноду-цель → её выходы (чисел по нему у панели нет)',
+      hopFrom: 'каскад из ', hopTipA: 'прыжок через ', hopTipB: ' — сюда каскадят: ', hopTipC: '; дальше — выходы этой ноды',
+      posReset: 'вернуть расстановку', posHint: 'карточки можно перетаскивать мышью — линии идут за ними; расстановка запоминается в браузере',
+      pCascade: 'Каскад через ', pExit: 'Выход ', pByNodes: 'по нодам: ', pByNodesNote: ' — какой аутбаунд xray выбрал для конкретного пользователя, панель не знает (это видно только в access.log ноды)',
+      pnLabel: 'список: ', pnOver: 'поверх схемы', pnSide: 'рядом', pnHint: 'где открывать список «кто на ноде»: шторкой поверх схемы (схема не перестраивается) или рядом со схемой (масштаб схемы при этом не меняется, нажатая карточка остаётся на месте)',
       noProfiles: 'конфигурация выходов недоступна — выходы не показаны',
       noteA: 'ветки ', noteB: ' есть в конфиге, но чисел по ним у панели нет',
       pUsers: 'Пользователи на ноде', pSeen: 'по панели активны ', pOf: ' · счётчик ноды ', pByPanel: ' (с пингами авто-выбора)', asOf: 'срез панели ',
       pEmptyA: 'по панели за последние ', pEmptyB: ' мин на этой ноде никто не был активен; счётчик ноды считает и пинги клиентов с авто-выбором серверов',
       pNone: 'сейчас никого', pErr: 'не удалось загрузить: ', pClose: 'закрыть',
       thUser: 'Пользователь', thIp: 'IP', thAs: 'AS', thGeo: 'гео', thSince: 'Активен',
-      mobile: 'моб.', hosting: 'хостинг/VPN', inbound: 'инбаунд'
+      mobile: 'моб.', hosting: 'хостинг/VPN', cdn: 'CDN', inbound: 'инбаунд'
     },
     en: {
       title: 'Traffic flow', sub: 'Live flow: users → nodes → exit · click a node to see who is on it', subNoUsers: 'Live flow: users → nodes → exit',
       now: 'Online now', loading: 'loading…', updated: 'updated ', nodata: 'no data: ',
       online: ' online', nodesCnt: ' nodes',
       capUsers: 'USERS', capNodes: 'NODES', capCascade: 'CASCADE', capExit: 'EXIT',
-      users: 'Users', noUsers: 'no users', mbps: ' Mbps', ppl: ' ppl', active: ' active', activeTip: 'active per panel', vpn: 'VPN ⇅ ', net: 'host NIC', liveSrc: 'panel live', dbSrc: 'DB sync (up to 5 min)', mob: 'mobile', fix: 'Wi-Fi/LAN', unk: 'unknown network', lgSplit: 'lines from the groups on the left: ', mobBox: 'Mobile network', fixBox: 'Wi-Fi / LAN', unkBox: 'Unknown network', allBox: 'Users', zIn: 'zoom in', zOut: 'zoom out', zReset: 'reset zoom', fSearch: 'search node name…', fActive: 'active only', fTraffic: 'with traffic only', vColumn: 'column', vGrid: 'grid', shown: 'shown ', ofN: ' of ', pgPrev: 'previous page', pgNext: 'next page', pgOf: ' of ', noMatch: 'no nodes match the filter — change the search or clear the checkboxes', zHint: 'mouse wheel — zoom (a tall diagram scrolls with the wheel; zoom with Ctrl/⌘), drag — pan', thNode: 'Node', pGroup: 'Active: ', pNoLive: 'no live panel poll right now — group lists are unavailable', pTrunc: 'panel snapshot is truncated (more users than the poll limit)', pollErr: ' · panel poll: error', pollTimeout: ' · panel poll: timeout',
+      users: 'Users', noUsers: 'no users', mbps: ' Mbps', ppl: ' ppl', active: ' active', activeTip: 'active per panel', vpn: 'VPN ⇅ ', net: 'host NIC', liveSrc: 'panel live', dbSrc: 'DB sync (up to 5 min)', mob: 'mobile', fix: 'Wi-Fi/LAN', unk: 'unknown network', lgSplit: 'lines from the groups on the left: ', mobBox: 'Mobile network', fixBox: 'Wi-Fi / LAN', cdnBox: 'Via CDN', cdnL: 'via CDN', unkBox: 'Unknown network', whyNoConn: 'node agent reported no IP', whyNoMeta: 'IP not enriched by GeoIP yet', whyCdn: 'behind CDN/proxy — the node does not see the client, set trustedXForwardedFor (see README)', allBox: 'Users', zIn: 'zoom in', zOut: 'zoom out', zReset: 'reset zoom', fSearch: 'search node name…', fActive: 'active only', fTraffic: 'with traffic only', vColumn: 'column', vGrid: 'grid', shown: 'shown ', ofN: ' of ', pgPrev: 'previous page', pgNext: 'next page', pgOf: ' of ', noMatch: 'no nodes match the filter — change the search or clear the checkboxes', zHint: 'mouse wheel — zoom (a tall diagram scrolls with the wheel; zoom with Ctrl/⌘), drag — pan', thNode: 'Node', pGroup: 'Active: ', pNoLive: 'no live panel poll right now — group lists are unavailable', pTrunc: 'panel snapshot is truncated (more users than the poll limit)', pollErr: ' · panel poll: error', pollTimeout: ' · panel poll: timeout',
       internet: 'Internet', blocked: 'Blocked', toNet: 'to the internet', noMeasure: 'not measured',
       lgLive: 'VPN traffic flowing (panel xray counters) — dashes move', lgIdle: 'connected but idle',
       lgBadge: 'on the node card, right: really active per panel · node counter (incl. auto-select probes)',
       offline: 'node unreachable', profile: 'profile', inbounds: 'inbounds',
+      tipCascTo: 'cascade → ', tipCascFrom: 'receives cascade from ', lgCasc: 'cascade: node → hop via the target node → its exits (the panel has no numbers for it)',
+      hopFrom: 'cascade from ', hopTipA: 'hop via ', hopTipB: ' — cascaded from: ', hopTipC: '; then this node\'s exits',
+      posReset: 'reset layout', posHint: 'cards can be dragged — the lines follow; the layout is remembered in the browser',
+      pCascade: 'Cascade via ', pExit: 'Exit ', pByNodes: 'by nodes: ', pByNodesNote: ' — which outbound xray picked for a given user is unknown to the panel (only the node access.log knows)',
+      pnLabel: 'list: ', pnOver: 'over the diagram', pnSide: 'beside', pnHint: 'where the “who is on the node” list opens: as a drawer over the diagram (the diagram is not re-laid out) or beside it (the diagram keeps its scale and the clicked card stays put)',
       noProfiles: 'exit config unavailable — exits are hidden',
       noteA: 'branches ', noteB: ' exist in the config, but the panel has no numbers for them',
       pUsers: 'Users on the node', pSeen: 'active per panel ', pOf: ' · node counter ', pByPanel: ' (incl. auto-select probes)', asOf: 'panel snapshot ',
       pEmptyA: 'per panel nobody was active on this node in the last ', pEmptyB: ' min; the node counter also counts probes from clients with server auto-select',
       pNone: 'nobody right now', pErr: 'failed to load: ', pClose: 'close',
       thUser: 'User', thIp: 'IP', thAs: 'AS', thGeo: 'geo', thSince: 'Active',
-      mobile: 'mobile', hosting: 'hosting/VPN', inbound: 'inbound'
+      mobile: 'mobile', hosting: 'hosting/VPN', cdn: 'CDN', inbound: 'inbound'
     }
   };
   function lang() {
@@ -92,6 +102,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     chain: '<path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/>',
     mobile: '<rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/>',
     wifi: '<path d="M5 12.55a11 11 0 0114.08 0"/><path d="M1.42 9a16 16 0 0121.16 0"/><path d="M8.53 16.11a6 6 0 016.95 0"/><path d="M12 20h.01"/>',
+    cdn: '<path d="M17.5 19a4.5 4.5 0 000-9 6 6 0 00-11.5 1.5A3.75 3.75 0 006.75 19z"/>',
     unknown: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>'
   };
   function ico(kind, x, y) {
@@ -127,6 +138,63 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
   var lastSvgHtml = null;
   var pendingScroll = null;   // прокрутка холста, которую надо вернуть после fit()
   function isLive(n) { return n.connected && n.users > 0 && (n.vpn_mbps != null ? n.vpn_mbps > 0 : (n.tx_mbps > 0 || n.rx_mbps > 0)); }
+  // Каскад — свойство ребра, а не ноды: нода-цель остаётся обычной нодой со
+  // своими юзерами. Для тултипов держим имена по uuid и обратную карту «кто
+  // каскадит на меня» по ВСЕМ нодам (не только видимым на странице).
+  var nodeNames = {}, cascFrom = {};
+  function indexCascades(d) {
+    nodeNames = {}; cascFrom = {};
+    (d.nodes || []).forEach(function (n) { nodeNames[n.uuid] = n.name; });
+    (d.nodes || []).forEach(function (n) {
+      (n.cascades || []).forEach(function (u) { (cascFrom[u] = cascFrom[u] || []).push(n.name); });
+    });
+  }
+  function hasCascades(d) { return (d.nodes || []).some(function (n) { return (n.cascades || []).length > 0; }); }
+  function cascPath(live, dAttr) {
+    return '<path class="lf-casc' + (live ? ' live' : '') + '"' + (live ? phase() : '') + ' d="' + dAttr + '"/>';
+  }
+  function shortName(name, max) {
+    var s = String(name || '');
+    return s.length > max ? s.slice(0, max - 1) + '…' : s;
+  }
+  // Колонка «Каскад» — карточки-прыжки, по одной на ноду-цель, в порядке нод
+  // панели. Нода-цель при этом остаётся обычной нодой в своём столбце (у неё
+  // свои юзеры и свои выходы); прыжок показывает путь: источник → через цель →
+  // выходы цели. Источники — ноды текущей страницы с каскадом на эту цель.
+  function cascadeHops(d, pageNodes) {
+    var byUuid = {}, order = {};
+    (d.nodes || []).forEach(function (n) { byUuid[n.uuid] = n; });
+    sortNodes(d).forEach(function (n, i) { order[n.uuid] = i; });
+    var map = {};
+    pageNodes.forEach(function (n) {
+      if (!n.connected) return;
+      (n.cascades || []).forEach(function (tu) {
+        var h = map[tu] = map[tu] || { uuid: tu, name: (byUuid[tu] || {}).name || tu, sources: [], live: false, sinks: [], connected: true };
+        h.sources.push(n);
+        h.live = h.live || isLive(n);
+      });
+    });
+    var hops = Object.keys(map).map(function (k) { return map[k]; });
+    hops.forEach(function (h) {
+      var tn = byUuid[h.uuid];
+      if (tn) { h.sinks = tn.sinks || []; h.connected = !!tn.connected; }
+    });
+    hops.sort(function (a, b) { return (order[a.uuid] == null ? 1e9 : order[a.uuid]) - (order[b.uuid] == null ? 1e9 : order[b.uuid]); });
+    return hops;
+  }
+  function drawHopCard(h, p) {
+    var NH = GEO.NH, nodeW = GEO.nodeW, TXT = GEO.TXT, y = p.y - NH / 2;
+    var srcNames = h.sources.map(function (n) { return n.name; });
+    var tip = t().hopTipA + h.name + t().hopTipB + srcNames.join(', ') + t().hopTipC;
+    var sel = selected === 'c:' + h.uuid ? ' sel' : '';
+    var s = '<g class="lf-hop" data-hop="' + esc(h.uuid) + '" role="button" tabindex="0"><title>' + esc(tip) + '</title>';
+    s += '<rect class="lf-box lf-hopbox' + (h.connected ? '' : ' off') + sel + '" x="' + p.x + '" y="' + y + '" width="' + nodeW + '" height="' + NH + '" rx="8"/>';
+    s += ico('chain', p.x + 16, y + 19);
+    s += '<text class="lf-t" x="' + (p.x + TXT) + '" y="' + (y + 21) + '" dominant-baseline="central">' + esc(shortName(h.name, 26)) + '</text>';
+    var from = t().hopFrom + srcNames.map(function (n) { return String(n).split(/\s+/)[0]; }).join(', ');
+    s += '<text class="lf-s" x="' + (p.x + TXT) + '" y="' + (y + 39) + '" dominant-baseline="central">' + esc(shortName(from, 30)) + '</text>';
+    return s + '</g>';
+  }
   function byY(pos) { return function (a, b) { return pos['n:' + a.uuid].y - pos['n:' + b.uuid].y; }; }
 
   function splitText(sp) {
@@ -134,15 +202,35 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     var parts = [];
     if (sp.mobile || sp.mobile_users) parts.push(t().mob + ' ' + (sp.mobile || 0).toFixed(2) + t().mbps + ' (' + (sp.mobile_users || 0) + ')');
     if (sp.fixed || sp.fixed_users) parts.push(t().fix + ' ' + (sp.fixed || 0).toFixed(2) + t().mbps + ' (' + (sp.fixed_users || 0) + ')');
+    if (sp.cdn || sp.cdn_users) parts.push(t().cdnL + ' ' + (sp.cdn || 0).toFixed(2) + t().mbps + ' (' + (sp.cdn_users || 0) + ')');
     if (sp.unknown || sp.unknown_users) parts.push(t().unk + ' ' + (sp.unknown || 0).toFixed(2) + t().mbps + ' (' + (sp.unknown_users || 0) + ')');
     return parts.join(' · ');
   }
 
   // ── настройки вида (живут в localStorage): режим, компактность, фильтры ──
   var PREFS_KEY = 'lf.prefs';
-  var prefs = { view: 'column', q: '', onlyActive: false, onlyTraffic: false, page: 0 };
+  var prefs = { view: 'column', q: '', onlyActive: false, onlyTraffic: false, page: 0, panel: 'side', panelChosen: false, pos: {}, posGrid: {} };
+  // Сдвиг карточки, перетащенной мышью (единицы viewBox). У «столбца» и «колонок»
+  // раскладки разные, поэтому и карты сдвигов свои: pos и posGrid.
+  function posMap() { var k = prefs.view === 'grid' ? 'posGrid' : 'pos'; if (!prefs[k]) prefs[k] = {}; return prefs[k]; }
+  function posOf(key) { var o = posMap()[key]; return o ? { dx: +o.dx || 0, dy: +o.dy || 0 } : { dx: 0, dy: 0 }; }
+  function hasPos() { return Object.keys(posMap()).length > 0; }
+  // Размещение карточки с учётом сдвига: не левее/выше края, правый и нижний
+  // край холста (reach) растут под сдвинутые карточки.
+  function placer(pos, reach, minY) {
+    return function (key, x, y, w, h) {
+      var o = posOf(key), hh = h || GEO.NH;
+      var q = { x: Math.max(8, x + o.dx), y: Math.max(minY, y + o.dy) };
+      reach.x = Math.max(reach.x, q.x + w); reach.y = Math.max(reach.y, q.y + hh / 2);
+      pos[key] = q;
+      return q;
+    };
+  }
   (function () {
     try { var raw = localStorage.getItem(PREFS_KEY); if (raw) { var o = JSON.parse(raw); Object.keys(prefs).forEach(function (k) { if (o && o[k] !== undefined) prefs[k] = o[k]; }); } } catch (e) { /* ignore */ }
+    // Режим списка по умолчанию сменился на «рядом» (0.18.5): сохранённое «поверх»
+    // из прежних версий не считается выбором, пока пользователь не нажал переключатель сам.
+    if (!prefs.panelChosen) prefs.panel = 'side';
   })();
   function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (e) { /* ignore */ } }
 
@@ -185,7 +273,8 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       ? [{ k: 'mobile', cls: 'm', icon: 'mobile', title: t().mobBox, users: tot.mobile_users || 0, mbps: tot.mobile || 0 },
          { k: 'fixed', cls: 'f', icon: 'wifi', title: t().fixBox, users: tot.fixed_users || 0, mbps: tot.fixed || 0 }]
       : [{ k: 'all', cls: 'a', icon: 'users', title: t().users, users: (d.total_active != null ? d.total_active : (d.total_users || 0)), mbps: null }];
-    if (tot && (tot.unknown_users || 0) > 0) classes.push({ k: 'unknown', cls: 'u', icon: 'unknown', title: t().unkBox, users: tot.unknown_users || 0, mbps: tot.unknown || 0 });
+    if (tot && (tot.cdn_users || 0) > 0) classes.push({ k: 'cdn', cls: 'c', icon: 'cdn', title: t().cdnBox, users: tot.cdn_users || 0, mbps: tot.cdn || 0 });
+    if (tot && (tot.unknown_users || 0) > 0) classes.push({ k: 'unknown', cls: 'u', icon: 'unknown', title: t().unkBox, users: tot.unknown_users || 0, mbps: tot.unknown || 0, why: tot.unknown_why });
     return classes;
   }
   function cUsers(n, c) { return c.k === 'all' ? n.users : (((n.vpn_split || {})[c.k + '_users']) || 0); }
@@ -198,8 +287,15 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
   }
   // Карточка-источник (группа по типу сети или «Пользователи»); кликабельна.
   function drawGroupCard(c, selected) {
-    var cy = c.y, X = GEO.userX, W = GEO.userW, H = GEO.userH, TXT = GEO.TXT;
+    var cy = c.y, X = c.x != null ? c.x : GEO.userX, W = GEO.userW, H = GEO.userH, TXT = GEO.TXT;
     var tip = c.title + ' · ' + c.users + t().active + (c.mbps != null ? ' · ' + t().vpn + c.mbps.toFixed(2) + t().mbps : '');
+    if (c.why) { // причины «неизвестно»: агент не сообщил IP / IP без GeoIP / IP за CDN
+      var w = [];
+      if (c.why.no_conn) w.push(c.why.no_conn + ' — ' + t().whyNoConn);
+      if (c.why.no_meta) w.push(c.why.no_meta + ' — ' + t().whyNoMeta);
+      if (c.why.cdn) w.push(c.why.cdn + ' — ' + t().whyCdn);
+      if (w.length) tip += ' · ' + w.join(' · ');
+    }
     var gsel = selected === 'g:' + c.k ? ' sel' : '';
     var s = '<g class="lf-node lf-grp" data-group="' + c.k + '" role="button" tabindex="0"><title>' + esc(tip) + '</title>';
     s += '<rect class="lf-box lf-src-' + c.cls + gsel + '" x="' + X + '" y="' + (cy - H / 2) + '" width="' + W + '" height="' + H + '" rx="8"/>';
@@ -219,7 +315,9 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       + (n.vpn_split ? ' · ' + splitText(n.vpn_split) : '')
       + (n.connected ? ' · ' + t().net + ': ↑ ' + (n.tx_mbps || 0).toFixed(2) + ' ↓ ' + (n.rx_mbps || 0).toFixed(2) + t().mbps : '')
       + (n.profile ? ' · ' + t().profile + ': ' + n.profile : '')
-      + ((n.inbounds || []).length ? ' · ' + t().inbounds + ': ' + n.inbounds.join(', ') : '');
+      + ((n.inbounds || []).length ? ' · ' + t().inbounds + ': ' + n.inbounds.join(', ') : '')
+      + ((n.cascades || []).length ? ' · ' + t().tipCascTo + n.cascades.map(function (u) { return nodeNames[u] || u; }).join(', ') : '')
+      + (cascFrom[n.uuid] ? ' · ' + t().tipCascFrom + cascFrom[n.uuid].join(', ') : '');
     var s = '<g class="lf-node" data-uuid="' + esc(n.uuid) + '" role="button" tabindex="0"><title>' + esc(tip) + '</title>';
     s += '<rect class="lf-box' + off + sel + '" x="' + p.x + '" y="' + y + '" width="' + nodeW + '" height="' + NH + '" rx="8"/>';
     var tx = n.tx_mbps || 0, rx = n.rx_mbps || 0;
@@ -235,10 +333,13 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
   }
   function drawSinkCard(sk, p, manyInternet) {
     var NH = GEO.NH, sinkW = GEO.sinkW, TXT = GEO.TXT, y = p.y - NH / 2, off = sk.kind === 'internet' ? '' : ' off';
-    var s = '<rect class="lf-box' + off + '" x="' + p.x + '" y="' + y + '" width="' + sinkW + '" height="' + NH + '" rx="8"/>';
+    var sel = selected === 's:' + sk.tag ? ' sel' : '';
+    var s = '<g class="lf-sink" data-sink="' + esc(sk.tag) + '" role="button" tabindex="0"><title>' + esc(sinkTitle(sk, manyInternet) + (sk.addr ? ' → ' + sk.addr : '')) + '</title>';
+    s += '<rect class="lf-box' + off + sel + '" x="' + p.x + '" y="' + y + '" width="' + sinkW + '" height="' + NH + '" rx="8"/>';
     s += ico(sk.kind, p.x + 16, y + 19);
     s += '<text class="lf-t" x="' + (p.x + TXT) + '" y="' + (y + 21) + '" dominant-baseline="central">' + esc(sinkTitle(sk, manyInternet)) + '</text>';
-    return s + '<text class="lf-s" x="' + (p.x + TXT) + '" y="' + (y + 39) + '" dominant-baseline="central">' + (sk.kind === 'internet' ? t().toNet : t().noMeasure) + '</text>';
+    var sub = sk.kind === 'internet' ? t().toNet : (sk.kind === 'chain' && sk.addr ? '→ ' + sk.addr : t().noMeasure);
+    return s + '<text class="lf-s" x="' + (p.x + TXT) + '" y="' + (y + 39) + '" dominant-baseline="central">' + esc(sub) + '</text></g>';
   }
   function svgOpen(W, H) {
     return '<svg viewBox="0 0 ' + W + ' ' + H + '" data-w="' + W + '" data-h="' + H + '" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMin meet">';
@@ -250,6 +351,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       // всё отфильтровано — короткая заглушка вместо схемы без нод
       return svgOpen(1050, 110) + '<text class="lf-cap" x="525" y="60" text-anchor="middle">' + esc(t().noMatch) + '</text></svg>';
     }
+    indexCascades(d);
     if (prefs.view === 'grid' && nodes.length > 0) return renderGrid(d, selected, nodes);
     // большой парк — страницами по COLUMN_PAGE, иначе схема на 100 нод тянется на тысячи пикселей
     var allN = nodes.length, pages = nodes.length > COLUMN_PAGE ? Math.ceil(nodes.length / COLUMN_PAGE) : 1;
@@ -261,45 +363,54 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     var maxUsers = Math.max.apply(null, [1].concat(nodes.map(function (n) { return n.users; })));
     var NH = GEO.NH, STEP = GEO.STEP, TOP = GEO.TOP, nodeW = GEO.nodeW, userX = GEO.userX, userW = GEO.userW, userH = GEO.userH, sinkW = GEO.sinkW;
 
-    // Каскад раскладывает граф в 4 колонки: нода-цель уезжает в отдельный ряд
-    // правее (две линии: синяя от юзеров + янтарная от источника), выходы ещё
-    // правее, масштаб мельче (шире viewBox).
-    var targets = {};
-    nodes.forEach(function (n) { (n.cascades || []).forEach(function (u) { targets[u] = true; }); });
-    var cascNodes = nodes.filter(function (n) { return targets[n.uuid]; });
-    var mainNodes = nodes.filter(function (n) { return !targets[n.uuid]; });
-    var hasCasc = cascNodes.length > 0;
-
-    var nodeX = 420, cascX = 830;
+    // Все ноды — в одном столбце в порядке панели: нода-цель каскада остаётся
+    // обычной нодой со своими юзерами. Каскад — отдельная колонка «прыжков»
+    // (см. cascadeHops): карточка «через <нода-цель>» между нодами и выходами,
+    // в неё идёт линия из источника, из неё — к выходам ноды-цели. Так виден
+    // весь путь MOW → HEL → интернет, а ноды никуда не переселяются.
+    var hops = cascadeHops(d, nodes);
+    var hasCasc = hops.length > 0;
+    var nodeX = 420, hopX = 830;
     var sinkX = hasCasc ? 1230 : 830;
     var W = hasCasc ? 1450 : 1050;
 
-    var mainRows = Math.max(mainNodes.length, 2);
+    var mainRows = Math.max(nodes.length, 2);
     var centerY = (TOP + (TOP + mainRows * STEP)) / 2;
 
-    var pos = {};
-    mainNodes.forEach(function (n, i) { pos['n:' + n.uuid] = { x: nodeX, y: TOP + i * STEP + NH / 2 }; });
-    var cascTop = TOP + Math.max(0, mainNodes.length - cascNodes.length) * STEP / 2;
-    cascNodes.forEach(function (n, j) { pos['n:' + n.uuid] = { x: cascX, y: cascTop + j * STEP + NH / 2 }; });
+    // Ручная расстановка: сдвиг из prefs.pos прибавляется к вычисленной позиции,
+    // карточка не уходит за левый/верхний край; правый/нижний край холста
+    // растёт под сдвинутые карточки (see below).
+    var pos = {}, reach = { x: 0, y: 0 }, place = placer(pos, reach, TOP + NH / 2);
+    nodes.forEach(function (n, i) { place('n:' + n.uuid, nodeX, TOP + i * STEP + NH / 2, nodeW); });
+    var hopTotalH = hops.length ? hops.length * NH + (hops.length - 1) * 24 : 0;
+    var hopTop = Math.max(TOP, centerY - hopTotalH / 2);
+    hops.forEach(function (h, i) { place('h:' + h.uuid, hopX, hopTop + i * (NH + 24) + NH / 2, nodeW); });
 
     var live = sinks.filter(function (s) { return s.kind === 'internet'; });
     var other = sinks.filter(function (s) { return s.kind !== 'internet'; });
     var ordered = live.concat(other);
     var sinkTotalH = ordered.length ? ordered.length * NH + (ordered.length - 1) * 24 : 0;
     var sinkTop = Math.max(TOP, centerY - sinkTotalH / 2);
-    ordered.forEach(function (sk, i) { pos['s:' + sk.tag] = { x: sinkX, y: sinkTop + i * (NH + 24) + NH / 2 }; });
+    ordered.forEach(function (sk, i) { place('s:' + sk.tag, sinkX, sinkTop + i * (NH + 24) + NH / 2, sinkW); });
 
-    var H = Math.max(TOP + mainRows * STEP, cascTop + cascNodes.length * STEP, sinkTop + sinkTotalH) + 34;
+    var H = Math.max(TOP + mainRows * STEP, hopTop + hopTotalH, sinkTop + sinkTotalH) + 34;
+
+    var classes = buildClasses(d);
+    var boxGap = 18, colH = classes.length * userH + (classes.length - 1) * boxGap, top0 = centerY - colH / 2;
+    classes.forEach(function (c, i) {
+      var o = posOf('g:' + c.k);
+      c.x = Math.max(8, userX + o.dx);
+      c.y = Math.max(TOP + userH / 2, top0 + i * (userH + boxGap) + userH / 2 + o.dy);
+      reach.x = Math.max(reach.x, c.x + userW); reach.y = Math.max(reach.y, c.y + userH / 2);
+    });
+    if (hasPos()) { W = Math.max(W, reach.x + 30); H = Math.max(H, reach.y + 34); }
 
     var s = svgOpen(W, H);
     s += '<text class="lf-cap" x="' + userX + '" y="18">' + t().capUsers + '</text>';
     s += '<text class="lf-cap" x="' + nodeX + '" y="18">' + t().capNodes + (pages > 1 ? ' · ' + pageInfo.from + '–' + pageInfo.to + ' / ' + allN : '') + '</text>';
-    if (hasCasc) s += '<text class="lf-cap" x="' + cascX + '" y="18">' + t().capCascade + '</text>';
+    if (hasCasc) s += '<text class="lf-cap" x="' + hopX + '" y="18">' + t().capCascade + '</text>';
     if (ordered.length) s += '<text class="lf-cap" x="' + sinkX + '" y="18">' + t().capExit + '</text>';
 
-    var classes = buildClasses(d);
-    var boxGap = 18, colH = classes.length * userH + (classes.length - 1) * boxGap, top0 = centerY - colH / 2;
-    classes.forEach(function (c, i) { c.y = top0 + i * (userH + boxGap) + userH / 2; });
     // Линии группа → нода: только к нодам на связи, где у этой группы кто-то есть.
     var srcEdges = [], incoming = {}, maxClassUsers = 1;
     classes.forEach(function (c) {
@@ -315,20 +426,27 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       var p = pos['n:' + n.uuid], inc = incoming[n.uuid];
       if (!p || !inc) return;
       inc.forEach(function (e, j) {
-        srcEdges.push({ n: n, c: e.c, d: [userX + userW, e.y0, p.x, port(p.y, NH, j, inc.length)] });
+        srcEdges.push({ n: n, c: e.c, d: [e.c.x + userW, e.y0, p.x, port(p.y, NH, j, inc.length)] });
       });
     });
     // Ноды, которым рисуем линию к выходу: на связи и кто-то онлайн по счётчику.
     var active = nodes.filter(function (n) { return pos['n:' + n.uuid] && n.connected && n.users > 0; }).sort(byY(pos));
     // нода → выход: у каждого internet-выхода свои порты по числу входящих линий
-    var sinkEdges = [];
+    var sinkEdges = [], hopSinkEdges = [];
     ordered.forEach(function (sk) {
       if (sk.kind !== 'internet') return;
       var sp = pos['s:' + sk.tag];
       var src = active.filter(function (n) { return (n.sinks || []).indexOf(sk.tag) >= 0; });
+      // прыжки, чья нода-цель выходит в этот же internet-выход — порты после нод
+      var viaHop = hops.filter(function (h) { return h.sinks.indexOf(sk.tag) >= 0; });
+      var total = src.length + viaHop.length;
       src.forEach(function (n, i) {
         var p = pos['n:' + n.uuid];
-        sinkEdges.push({ n: n, d: [p.x + nodeW, p.y, sp.x, port(sp.y, NH, i, src.length)] });
+        sinkEdges.push({ n: n, d: [p.x + nodeW, p.y, sp.x, port(sp.y, NH, i, total)] });
+      });
+      viaHop.forEach(function (h, j) {
+        var hp = pos['h:' + h.uuid];
+        hopSinkEdges.push({ h: h, d: [hp.x + nodeW, hp.y, sp.x, port(sp.y, NH, src.length + j, total)] });
       });
     });
 
@@ -340,19 +458,18 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       var e = se.d;
       s += flowPath('', isLive(se.n), widthFor(se.n.users, maxUsers).toFixed(2), edge(e[0], e[1], e[2], e[3]));
     });
-    // каскад: источник (колонка 2) → цель (колонка 3), янтарная линия в саму ноду
-    nodes.forEach(function (n) {
-      var p = pos['n:' + n.uuid];
-      if (!p) return;
-      (n.cascades || []).forEach(function (tu) {
-        var tp = pos['n:' + tu];
-        if (!tp) return;
-        var lv = isLive(n);
-        s += '<path class="lf-casc' + (lv ? ' live' : '') + '"' + (lv ? phase() : '') + ' d="' + edge(p.x + nodeW, p.y, tp.x, tp.y) + '"/>';
+    // каскад: источник → карточка-прыжок → выходы ноды-цели
+    hops.forEach(function (h) {
+      var hp = pos['h:' + h.uuid];
+      h.sources.forEach(function (n) {
+        var p = pos['n:' + n.uuid];
+        if (p) s += cascPath(isLive(n), edge(p.x + nodeW, p.y, hp.x, hp.y));
       });
     });
+    hopSinkEdges.forEach(function (e) { s += cascPath(e.h.live, edge(e.d[0], e.d[1], e.d[2], e.d[3])); });
     classes.forEach(function (c) { s += drawGroupCard(c, selected); });
     nodes.forEach(function (n) { var p = pos['n:' + n.uuid]; if (p) s += drawNodeCard(n, p, selected); });
+    hops.forEach(function (h) { s += drawHopCard(h, pos['h:' + h.uuid]); });
     ordered.forEach(function (sk) { s += drawSinkCard(sk, pos['s:' + sk.tag], live.length > 1); });
     return s + '</svg>';
   }
@@ -395,29 +512,43 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     var lbus = function (c) { return grid0 + c * colPitch; };
     var cardX = function (c) { return lbus(c) + BUS; };
     var rbus = function (c) { return cardX(c) + nodeW + BUS; };
-    var sinkX = rbus(cols - 1) + 60;
-    var W = ordered.length ? sinkX + sinkW + 40 : rbus(cols - 1) + 40;
+    // Каскад — как в «столбце»: колонка карточек-прыжков между сеткой и выходами
+    var hops = cascadeHops(d, nodes);
+    var hasCasc = hops.length > 0;
+    var hopX = rbus(cols - 1) + 60;
+    var sinkX = hasCasc ? hopX + nodeW + 60 : rbus(cols - 1) + 60;
+    var W = ordered.length ? sinkX + sinkW + 40 : (hasCasc ? hopX + nodeW + 40 : rbus(cols - 1) + 40);
     var centerY = topY + rows * STEP / 2;
 
-    var pos = {}, colOf = {}, byCol = [];
+    var pos = {}, reach = { x: 0, y: 0 }, place = placer(pos, reach, TOP + 6 + NH / 2), colOf = {}, byCol = [];
     for (var ci = 0; ci < cols; ci++) byCol.push([]);
     nodes.forEach(function (n, i) {
       var c = Math.floor(i / rows), r = i % rows;
       colOf[n.uuid] = c; byCol[c].push(n);
-      pos['n:' + n.uuid] = { x: cardX(c), y: topY + r * STEP + NH / 2 };
+      place('n:' + n.uuid, cardX(c), topY + r * STEP + NH / 2, nodeW);
     });
     var sinkTotalH = ordered.length ? ordered.length * NH + (ordered.length - 1) * 24 : 0;
     var sinkTop = Math.max(topY, centerY - sinkTotalH / 2);
-    ordered.forEach(function (sk, i) { pos['s:' + sk.tag] = { x: sinkX, y: sinkTop + i * (NH + 24) + NH / 2 }; });
+    ordered.forEach(function (sk, i) { place('s:' + sk.tag, sinkX, sinkTop + i * (NH + 24) + NH / 2, sinkW); });
+    var hopTotalH = hops.length ? hops.length * NH + (hops.length - 1) * 24 : 0;
+    var hopTop = Math.max(topY, centerY - hopTotalH / 2);
+    hops.forEach(function (h, i) { place('h:' + h.uuid, hopX, hopTop + i * (NH + 24) + NH / 2, nodeW); });
     var boxGap = 18, colH = G * userH + (G - 1) * boxGap, top0 = Math.max(TOP + 6, centerY - colH / 2);
-    classes.forEach(function (c, i) { c.y = top0 + i * (userH + boxGap) + userH / 2; });
-    // высота — по самой длинной колонке: сетка с полосами, выходы, группы
-    var H = Math.max(bandBot + lanesBot * LANE, sinkTop + sinkTotalH, top0 + colH) + 34;
+    classes.forEach(function (c, i) {
+      var o = posOf('g:' + c.k);
+      c.x = Math.max(8, userX + o.dx);
+      c.y = Math.max(TOP + 6 + userH / 2, top0 + i * (userH + boxGap) + userH / 2 + o.dy);
+      reach.x = Math.max(reach.x, c.x + userW); reach.y = Math.max(reach.y, c.y + userH / 2);
+    });
+    // высота — по самой длинной колонке: сетка с полосами, прыжки, выходы, группы
+    var H = Math.max(bandBot + lanesBot * LANE, hopTop + hopTotalH, sinkTop + sinkTotalH, top0 + colH) + 34;
+    if (hasPos()) { W = Math.max(W, reach.x + 30); H = Math.max(H, reach.y + 34); }
 
     var s = svgOpen(W, H);
     s += '<text class="lf-cap" x="' + userX + '" y="18">' + t().capUsers + '</text>';
     s += '<text class="lf-cap" x="' + grid0 + '" y="18">' + t().capNodes + ' · '
       + (pages > 1 ? pageInfo.from + '–' + pageInfo.to + ' / ' + all.length : nodes.length) + '</text>';
+    if (hasCasc) s += '<text class="lf-cap" x="' + hopX + '" y="18">' + t().capCascade + '</text>';
     if (ordered.length) s += '<text class="lf-cap" x="' + sinkX + '" y="18">' + t().capExit + '</text>';
 
     // агрегаты по колонкам
@@ -461,7 +592,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
         var st = colStat[c].cls[cl.k];
         if (!st || !st.users) continue;
         var lane = c * G + gi, yb = bandTop + lane * LANE;
-        var gy = port(cl.y, userH, c, cols), bx = lbus(c);
+        var gy = port(cl.y, userH, c, cols), bx = lbus(c), gx = cl.x + userW;   // правый край карточки группы (с учётом сдвига)
         var rx = Math.max(gx + 16, Math.min(gx + 40 + (lanesTop - lane) * 3, bx - 24));
         var dAttr = 'M ' + gx + ' ' + gy + ' C ' + ((gx + rx) / 2) + ' ' + gy + ', ' + ((gx + rx) / 2) + ' ' + yb + ', ' + rx + ' ' + yb
           + ' L ' + (bx - 12) + ' ' + yb + ' Q ' + bx + ' ' + yb + ' ' + bx + ' ' + (yb + 12) + ' L ' + bx + ' ' + (topY - 2);
@@ -479,37 +610,37 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       });
       if (S && n.users > 0) s += flowPath('', isLive(n), widthFor(n.users, maxUsers).toFixed(2), 'M ' + (p.x + nodeW) + ' ' + p.y + ' L ' + rbus(c) + ' ' + p.y);
     });
-    // правая шина колонки → выход: по нижней полосе
+    // правая шина колонки → выход: по нижней полосе; порты выхода делятся с прыжками каскада
     liveSinks.forEach(function (sk, si) {
       var sp = pos['s:' + sk.tag];
+      var viaHop = hops.filter(function (h) { return h.sinks.indexOf(sk.tag) >= 0; });
+      var total = cols + viaHop.length;
+      viaHop.forEach(function (h, j) {
+        var hp = pos['h:' + h.uuid];
+        s += cascPath(h.live, edge(hp.x + nodeW, hp.y, sp.x, port(sp.y, NH, cols + j, total)));
+      });
       for (var c = 0; c < cols; c++) {
         var st = colStat[c].sink[sk.tag];
         if (!st || !st.users) continue;
         var lane = c * S + si, yb = bandBot + lane * LANE;
-        var bx = rbus(c), ey = port(sp.y, NH, c, cols), ex = sp.x, rx = ex - 30 - (lanesBot - lane) * 3;
+        var bx = rbus(c), ey = port(sp.y, NH, c, total), ex = sp.x, rx = ex - 30 - (lanesBot - lane) * 3;
         var firstY = pos['n:' + byCol[c][0].uuid].y - NH / 2 - 4;
         var dAttr = 'M ' + bx + ' ' + firstY + ' L ' + bx + ' ' + (yb - 12) + ' Q ' + bx + ' ' + yb + ' ' + (bx + 12) + ' ' + yb
           + ' L ' + rx + ' ' + yb + ' C ' + ((rx + ex) / 2) + ' ' + yb + ', ' + ((rx + ex) / 2) + ' ' + ey + ', ' + ex + ' ' + ey;
         s += flowPath('', st.live, trunkW(st.users, maxColUsers), dAttr);
       }
     });
-    // каскад: прямая янтарная линия из источника в цель
-    nodes.forEach(function (n) {
-      var p = pos['n:' + n.uuid], cs = colOf[n.uuid];
-      (n.cascades || []).forEach(function (tu) {
-        var tp = pos['n:' + tu];
-        if (!tp) return;                                  // цель на другой странице
-        var corr = rbus(Math.max(cs, colOf[tu])) + GAP / 2;   // коридор правее обеих колонок
-        var dn = tp.y > p.y ? 1 : -1, lv = isLive(n);
-        var dAttr = 'M ' + (p.x + nodeW) + ' ' + p.y + ' L ' + (corr - 10) + ' ' + p.y
-          + ' Q ' + corr + ' ' + p.y + ' ' + corr + ' ' + (p.y + dn * 10)
-          + ' L ' + corr + ' ' + (tp.y - dn * 10) + ' Q ' + corr + ' ' + tp.y + ' ' + (corr - 10) + ' ' + tp.y
-          + ' L ' + (tp.x + nodeW) + ' ' + tp.y;
-        s += '<path class="lf-casc' + (lv ? ' live' : '') + '"' + (lv ? phase() : '') + ' d="' + dAttr + '"/>';
+    // каскад: источник → карточка-прыжок (дальше прыжок → выходы, см. выше)
+    hops.forEach(function (h) {
+      var hp = pos['h:' + h.uuid];
+      h.sources.forEach(function (n) {
+        var p = pos['n:' + n.uuid];
+        if (p) s += cascPath(isLive(n), edge(p.x + nodeW, p.y, hp.x, hp.y));
       });
     });
     classes.forEach(function (c) { s += drawGroupCard(c, selected); });
     nodes.forEach(function (n) { s += drawNodeCard(n, pos['n:' + n.uuid], selected); });
+    hops.forEach(function (h) { s += drawHopCard(h, pos['h:' + h.uuid]); });
     ordered.forEach(function (sk) { s += drawSinkCard(sk, pos['s:' + sk.tag], liveSinks.length > 1); });
     return s + '</svg>';
   }
@@ -543,7 +674,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       V + '.lf-pg:disabled{color:hsl(var(--muted-foreground, 220 9% 56%));opacity:.45;cursor:default}' +
       V + '.lf-pg-l{min-width:44px;text-align:center;white-space:nowrap}' +
       V + '.lf-body{display:flex;flex-direction:column;gap:12px}' +
-      V + '.lf-canvas{flex:1 1 auto;min-width:0;text-align:center;position:relative;overflow:hidden;touch-action:none}' +
+      V + '.lf-canvas{flex:1 1 auto;min-width:0;text-align:center;position:relative;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}' +
       V + '.lf-canvas.lf-scroll{overflow:auto;touch-action:pan-y}' +
       V + '.lf-zoom{transform-origin:0 0}' + V + '.lf-dragging .lf-zoom{will-change:transform}' +
       V + '.lf-zoomed .lf-canvas{cursor:grab}' + V + '.lf-canvas.lf-dragging{cursor:grabbing}' +
@@ -554,7 +685,18 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       V + '.lf-canvas svg{display:block;width:100%;height:auto;max-height:70vh;margin:0 auto}' +
       V + '.lf-canvas.lf-scroll svg{max-width:none}' +
       // На широком окне панель «кто на ноде» встаёт справа и не отъедает высоту у схемы
-      '@media (min-width:1100px){' + V + '.lf-body{flex-direction:row;align-items:flex-start}' + V + '.lf-panel.open{flex:0 0 clamp(420px, 46%, 700px)}' + V + '.lf-pw{max-height:60vh}}' +
+      '@media (min-width:1100px){' + V + '.lf-body{flex-direction:row;align-items:flex-start}' + V + '.lf-panel.open{flex:0 0 clamp(420px, 46%, 700px);position:sticky;top:8px}' + V + '.lf-panel .lf-pw{max-height:calc(100vh - 170px)}}' +  // .lf-panel — иначе базовое .lf-pw{38vh} ниже по файлу перебивает (та же специфичность, объявлено позже)
+      V + '.lf-pm{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}' +
+      V + '.lf-posreset{padding:0 9px;font-size:12px}' + V + '.lf-posreset[hidden]{display:none}' +
+      V + '.lf-canvas.lf-moving{cursor:grabbing}' + V + '.lf-canvas.lf-moving .lf-node,' + V + '.lf-canvas.lf-moving .lf-hop,' + V + '.lf-canvas.lf-moving .lf-sink{cursor:grabbing}' +
+      // Режим «поверх схемы»: холст остаётся во всю ширину, список — шторка справа
+      // высотой в холст, схема не перестраивается. Объявлено после медиа-правила,
+      // чтобы перекрыть его flex-direction:row и sticky.
+      // align-items:stretch — иначе в широкой раскладке остаётся flex-start от медиа-правила,
+      // и холст ужимается по содержимому (пустое поле справа после закрытия шторки)
+      V + '.lf-body.lf-over{position:relative;flex-direction:column;align-items:stretch}' +
+      V + '.lf-body.lf-over .lf-panel.open{position:absolute;top:0;right:0;bottom:0;flex:none;width:clamp(380px, 44%, 640px);z-index:3;overflow:auto;background:hsl(var(--card, 220 20% 10%) / .94);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);box-shadow:-14px 0 28px hsl(220 30% 4% / .45)}' +
+      V + '.lf-body.lf-over .lf-panel .lf-pw{max-height:none}' +
       V + '.lf-legend{display:flex;gap:18px;flex-wrap:wrap;color:hsl(var(--muted-foreground, 220 9% 56%));font:400 12px/1 ui-sans-serif,system-ui,sans-serif;margin-top:14px}' +
       V + '.lf-legend i{display:inline-block;width:24px;height:0;border-top:2px dashed currentColor;vertical-align:middle;margin-right:6px}' +
       V + '.lf-cap{fill:hsl(var(--muted-foreground, 220 9% 56%));font:400 11px/1 sans-serif;letter-spacing:.08em}' +
@@ -563,10 +705,11 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       V + '.lf-s{fill:hsl(var(--muted-foreground, 220 9% 56%));font:400 12px/1 sans-serif}' +
       V + '.lf-box{fill:hsl(var(--muted, 220 14% 16%));stroke:hsl(var(--border, 220 14% 18%));stroke-width:1}' +
       V + '.lf-box.off{opacity:.45}' +
-      V + '.lf-node{cursor:pointer;outline:none}' +
-      V + '.lf-noclick .lf-node{cursor:default}' +
-      V + '.lf-noclick .lf-node:hover .lf-box{stroke:hsl(var(--border, 220 14% 18%))}' +
-      V + '.lf-node:hover .lf-box,' + V + '.lf-node:focus .lf-box{stroke:hsl(var(--primary, 239 84% 67%) / .7)}' +
+      V + '.lf-box.lf-hopbox{stroke:hsl(172 66% 50% / .55);stroke-dasharray:4 3}' +
+      V + '.lf-node,' + V + '.lf-hop,' + V + '.lf-sink{cursor:pointer;outline:none}' +
+      V + '.lf-noclick .lf-node,' + V + '.lf-noclick .lf-hop,' + V + '.lf-noclick .lf-sink{cursor:default}' +
+      V + '.lf-noclick .lf-node:hover .lf-box,' + V + '.lf-noclick .lf-hop:hover .lf-box,' + V + '.lf-noclick .lf-sink:hover .lf-box{stroke:hsl(var(--border, 220 14% 18%))}' +
+      V + '.lf-node:hover .lf-box,' + V + '.lf-node:focus .lf-box,' + V + '.lf-hop:hover .lf-box,' + V + '.lf-hop:focus .lf-box,' + V + '.lf-sink:hover .lf-box,' + V + '.lf-sink:focus .lf-box{stroke:hsl(var(--primary, 239 84% 67%) / .7)}' +
       V + '.lf-box.sel{stroke:hsl(var(--primary, 239 84% 67%));stroke-width:1.6;fill:hsl(var(--primary, 239 84% 67%) / .12)}' +
       V + '.lf-flow{fill:none;stroke-linecap:butt;stroke-dasharray:7 6;pointer-events:none}' +
       V + '.lf-bus{fill:none;stroke:hsl(var(--border, 220 14% 18%));stroke-width:2;stroke-linecap:round;pointer-events:none}' +
@@ -574,12 +717,14 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       V + '.lf-flow.live.lf-anim,' + V + '.lf-casc.live.lf-anim,' + V + '.lf-noio .lf-flow.live,' + V + '.lf-noio .lf-casc.live{animation:lf-dash ' + DASH_MS + 'ms steps(13) infinite}' +
       V + '.lf-many .lf-flow.live,' + V + '.lf-many .lf-casc.live{animation-duration:' + (DASH_MS * 2) + 'ms;animation-timing-function:steps(13)}' +
       V + '.lf-flow.live.f{stroke:hsl(270 70% 66% / .85)}' +
+      V + '.lf-flow.live.c{stroke:hsl(38 80% 55% / .85)}' +
       V + '.lf-flow.live.u{stroke:hsl(var(--muted-foreground, 220 9% 56%) / .7)}' +
       V + '.lf-box.lf-src-f{stroke:hsl(270 70% 66% / .55)}' +
       V + '.lf-box.lf-src-m{stroke:hsl(var(--primary, 239 84% 67%) / .55)}' +
+      V + '.lf-box.lf-src-c{stroke:hsl(38 80% 55% / .55)}' +
       V + '.lf-flow.idle{stroke:hsl(var(--muted-foreground, 220 9% 56%) / .3)}' +
-      V + '.lf-casc{fill:none;stroke-linecap:round;stroke-dasharray:2 5;stroke-width:1.8;stroke:hsl(38 80% 55% / .65);pointer-events:none}' +
-      V + '.lf-casc.live{stroke:hsl(38 90% 60% / .9)}' +
+      V + '.lf-casc{fill:none;stroke-linecap:round;stroke-dasharray:2 5;stroke-width:1.8;stroke:hsl(172 66% 50% / .7);pointer-events:none}' +
+      V + '.lf-casc.live{stroke:hsl(172 80% 56% / .95)}' +
       V + '.lf-badge{fill:hsl(var(--card, 220 20% 10%));stroke:hsl(var(--primary, 239 84% 67%) / .5);stroke-width:1;pointer-events:none}' +
       V + '.lf-badge-t{fill:hsl(var(--foreground, 220 9% 84%));font:500 12px/1 sans-serif;pointer-events:none}' +
       V + '.lf-badge-d{fill:hsl(var(--muted-foreground, 220 9% 56%))}' +
@@ -639,7 +784,18 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     var W = parseFloat(svg.getAttribute('data-w')) || 1050, H = parseFloat(svg.getAttribute('data-h')) || 600;
     var cw = canvas.clientWidth || W;
     var natural = Math.min(cw / W, avail / H);
-    if (natural < MIN_SCALE) {
+    // Режим «рядом»: пока список открыт, схема держит тот пиксельный размер, что
+    // был до клика — холст сужается, но ничего не перемасштабируется, лишняя
+    // ширина уходит в прокрутку (settleSelected возвращает карточку на место).
+    var locked = fitLock && panel && panel.classList.contains('open') && prefs.panel === 'side'
+      && svg.getAttribute('data-w') === fitLock.dw && svg.getAttribute('data-h') === fitLock.dh;
+    if (locked) {
+      svg.style.maxHeight = 'none';
+      svg.style.width = Math.round(fitLock.w) + 'px';
+      svg.style.height = Math.round(fitLock.h) + 'px';
+      canvas.style.maxHeight = avail + 'px';
+      canvas.classList.add('lf-scroll');
+    } else if (natural < MIN_SCALE) {
       svg.style.maxHeight = 'none';
       svg.style.width = Math.floor(W * MIN_SCALE) + 'px';
       svg.style.height = Math.floor(H * MIN_SCALE) + 'px';
@@ -746,9 +902,11 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       lg[2].textContent = t().lgBadge;
     }
     var sl = view.querySelector('.lf-split-lg');
-    if (sl) sl.innerHTML = d.vpn_split_total
-      ? t().lgSplit + '<b class="lf-sw" style="border-color:hsl(var(--primary, 239 84% 67%))"></b>' + t().mob + ' <b class="lf-sw" style="border-color:hsl(270 70% 66%)"></b>' + t().fix + ' <b class="lf-sw" style="border-color:hsl(var(--muted-foreground, 220 9% 56%))"></b>' + t().unk
+    var splitLg = d.vpn_split_total
+      ? t().lgSplit + '<b class="lf-sw" style="border-color:hsl(var(--primary, 239 84% 67%))"></b>' + t().mob + ' <b class="lf-sw" style="border-color:hsl(270 70% 66%)"></b>' + t().fix + ' <b class="lf-sw" style="border-color:hsl(38 80% 55%)"></b>' + t().cdnL + ' <b class="lf-sw" style="border-color:hsl(var(--muted-foreground, 220 9% 56%))"></b>' + t().unk
       : '';
+    var cascLg = hasCascades(d) ? '<b class="lf-sw" style="border-color:hsl(172 66% 50%)"></b>' + t().lgCasc : '';
+    if (sl) sl.innerHTML = splitLg + (splitLg && cascLg ? ' · ' : '') + cascLg;
     syncPager(view);
     if (panelData) paintPanel(view, panelData);
     fit(view);
@@ -784,12 +942,16 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
   function paintPanel(view, pd) {
     var panel = view.querySelector('.lf-panel');
     var tt = t();
-    var isGrp = !!pd.group;
-    var h = '<div class="lf-ph"><b>' + (isGrp ? groupTitle(pd.group) : tt.pUsers + ': ' + esc(pd.node.name)) + '</b>';
+    var isGrp = !!pd.group || !!pd.kind;   // сводные списки: группа, каскад, выход — с колонкой «нода»
+    var title = pd.kind === 'cascade' ? tt.pCascade + esc(pd.target.name)
+      : pd.kind === 'exit' ? tt.pExit + esc(sinkTitle(pd.sink, true))
+      : isGrp ? groupTitle(pd.group) : tt.pUsers + ': ' + esc(pd.node.name);
+    var h = '<div class="lf-ph"><b>' + title + '</b>';
     h += '<span class="lf-pc">' + (isGrp
       ? tt.pGroup + pd.count + (pd.vpn_mbps != null ? ' · ' + tt.vpn + pd.vpn_mbps.toFixed(2) + tt.mbps : '')
       : tt.pSeen + pd.count + tt.pOf + pd.node.users_online + tt.pByPanel) + '</span>';
     h += '<button type="button" class="lf-px" aria-label="' + tt.pClose + '">✕ ' + tt.pClose + '</button></div>';
+    if (pd.by_nodes) h += '<div class="lf-pn">' + tt.pByNodes + esc((pd.nodes || []).join(', ')) + tt.pByNodesNote + '</div>';
     if (!pd.users.length) {
       var mins = Math.max(1, Math.round((pd.window_s || 180) / 60));
       h += '<div class="lf-pn">' + (pd.unavailable ? tt.pNoLive : (!isGrp && pd.node.users_online > 0 ? tt.pEmptyA + mins + tt.pEmptyB : tt.pNone)) + '</div>';
@@ -814,6 +976,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
           var as = r.asn ? '<b>AS' + esc(r.asn) + '</b>' : '<span class="lf-dim">—</span>';
           if (r.mobile) as += '<span class="lf-tag">' + tt.mobile + '</span>';
           if (r.hosting) as += '<span class="lf-tag">' + tt.hosting + '</span>';
+          if (r.cdn) as += '<span class="lf-tag">' + tt.cdn + '</span>';
           if (r.as_name) as += '<span class="lf-asn">' + esc(r.as_name) + '</span>';
           if (r.country || r.city) as += '<span class="lf-geo">' + esc([r.country, r.city].filter(Boolean).join(' · ')) + '</span>';
           var since = esc(fmtSince(r.since))
@@ -839,11 +1002,13 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
   }
 
   function panelUrl(key) {
-    return key.indexOf('g:') === 0
-      ? API_BASE + '/group/' + encodeURIComponent(key.slice(2)) + '/users'
-      : API_BASE + '/node/' + encodeURIComponent(key.slice(2)) + '/users';
+    var k = key.slice(0, 2), id = encodeURIComponent(key.slice(2));
+    return k === 'g:' ? API_BASE + '/group/' + id + '/users'
+      : k === 'c:' ? API_BASE + '/cascade/' + id + '/users'
+      : k === 's:' ? API_BASE + '/exit/' + id + '/users'
+      : API_BASE + '/node/' + id + '/users';
   }
-  function groupTitle(k) { return k === 'mobile' ? t().mobBox : k === 'fixed' ? t().fixBox : k === 'unknown' ? t().unkBox : t().allBox; }
+  function groupTitle(k) { return k === 'mobile' ? t().mobBox : k === 'fixed' ? t().fixBox : k === 'cdn' ? t().cdnBox : k === 'unknown' ? t().unkBox : t().allBox; }
   function loadPanel(view, uuid) {
     return fetch(panelUrl(uuid), { credentials: 'same-origin', cache: 'no-store' })
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
@@ -863,11 +1028,65 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       });
   }
 
+  // ── Список «кто на ноде» не должен уносить нажатую карточку ──
+  // Замок масштаба для режима «рядом»: пиксельный размер SVG до открытия списка
+  // (без учёта пользовательского зума) и габариты схемы, к которым он относится.
+  var fitLock = null;
+  function selEl(view, sel) {
+    if (!sel) return null;
+    var k = sel.slice(0, 2), id = sel.slice(2);
+    return k === 'g:' ? view.querySelector('.lf-grp[data-group="' + id + '"]')
+      : k === 'c:' ? view.querySelector('.lf-hop[data-hop="' + id + '"]')
+      : k === 's:' ? view.querySelector('.lf-sink[data-sink="' + id + '"]')
+      : view.querySelector('.lf-node[data-uuid="' + id + '"]');
+  }
+  function selRect(view, sel) { var el = selEl(view, sel); return el ? el.getBoundingClientRect() : null; }
+  function lockFit(view) {
+    var svg = view.querySelector('.lf-canvas svg');
+    if (!svg) { fitLock = null; return; }
+    var r = svg.getBoundingClientRect(), k = zoom.k || 1;
+    fitLock = { w: r.width / k, h: r.height / k, dw: svg.getAttribute('data-w'), dh: svg.getAttribute('data-h') };
+  }
+  // После перестройки: сначала вернуть карточку туда, где она была на экране
+  // (если холст прокручивается), затем — если она всё же вне видимой части
+  // холста (или под шторкой) — доскроллить с отступом.
+  function settleSelected(view, sel, prev) {
+    var canvas = view.querySelector('.lf-canvas'), panel = view.querySelector('.lf-panel');
+    if (!canvas || !sel) return;
+    var r = selRect(view, sel);
+    if (!r) return;
+    if (prev && canvas.classList.contains('lf-scroll')) {
+      canvas.scrollTop += r.top - prev.top;
+      canvas.scrollLeft += r.left - prev.left;
+      r = selRect(view, sel) || r;
+    }
+    var can = canvas.getBoundingClientRect();
+    var over = prefs.panel !== 'side' && panel && panel.classList.contains('open') ? panel.getBoundingClientRect().width : 0;
+    var right = can.right - over, pad = 14;
+    var dy = r.top < can.top ? r.top - can.top - pad : r.bottom > can.bottom ? r.bottom - can.bottom + pad : 0;
+    var dx = r.left < can.left ? r.left - can.left - pad : r.right > right ? r.right - right + pad : 0;
+    if (dy) canvas.scrollTop += dy;
+    if (dx) canvas.scrollLeft += dx;
+  }
+  function applyPanelMode(view) {
+    var body = view.querySelector('.lf-body');
+    if (!body) return;
+    body.classList.toggle('lf-over', prefs.panel !== 'side');
+    var prev = selRect(view, selected);
+    if (selected && prefs.panel === 'side' && !fitLock) lockFit(view);
+    if (prefs.panel !== 'side') fitLock = null;
+    fit(view);
+    if (selected) settleSelected(view, selected, prev);
+  }
+
   function openPanel(view, uuid) {
     if (selected === uuid) { closePanel(view); return; }
+    var wasOpen = !!selected;
     selected = uuid;
     panelData = null;
     if (lastData) setSvg(view, renderSvg(lastData, selected));
+    var prev = selRect(view, uuid);
+    if (!wasOpen) lockFit(view);                 // размер схемы до того, как список отнял ширину
     var panel = view.querySelector('.lf-panel');
     panel.innerHTML = '<div class="lf-ph"><b>' + t().pUsers + '</b><span class="lf-pc">' + t().loading + '</span></div>';
     panel.classList.add('open');
@@ -875,17 +1094,21 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     if (panelTimer) clearInterval(panelTimer);
     panelTimer = setInterval(function () { if (selected) loadPanel(view, selected); }, REFRESH_MS);
     fit(view);
+    settleSelected(view, uuid, prev);
   }
 
   function closePanel(view) {
+    var was = selected, prev = selRect(view, was);
     selected = null;
     panelData = null;
+    fitLock = null;
     if (panelTimer) { clearInterval(panelTimer); panelTimer = null; }
     var panel = view.querySelector('.lf-panel');
     panel.classList.remove('open');
     panel.innerHTML = '';
     if (lastData) setSvg(view, renderSvg(lastData, null));
     fit(view);
+    settleSelected(view, was, prev);
   }
 
   function tick(view) {
@@ -910,6 +1133,9 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
         '<span class="lf-sp"></span>' +
         '<span class="lf-seg"><button type="button" class="lf-seg-b' + (prefs.view !== 'grid' ? ' on' : '') + '" data-view="column">' + t().vColumn + '</button>' +
         '<button type="button" class="lf-seg-b' + (prefs.view === 'grid' ? ' on' : '') + '" data-view="grid">' + t().vGrid + '</button></span>' +
+        '<button type="button" class="lf-pg lf-posreset" title="' + esc(t().posHint) + '"' + (hasPos() ? '' : ' hidden') + '>' + t().posReset + '</button>' +
+        '<span class="lf-pm" title="' + esc(t().pnHint) + '">' + t().pnLabel + '<span class="lf-seg"><button type="button" class="lf-seg-b' + (prefs.panel !== 'side' ? ' on' : '') + '" data-panel="over">' + t().pnOver + '</button>' +
+        '<button type="button" class="lf-seg-b' + (prefs.panel === 'side' ? ' on' : '') + '" data-panel="side">' + t().pnSide + '</button></span></span>' +
         '<span class="lf-pager" hidden><button type="button" class="lf-pg" data-pg="-1" title="' + t().pgPrev + '">‹</button>' +
         '<span class="lf-pg-l">1' + t().pgOf + '1</span>' +
         '<button type="button" class="lf-pg" data-pg="1" title="' + t().pgNext + '">›</button></span>' +
@@ -925,11 +1151,10 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     // каждые 5 с, вешать обработчики на сами карточки бессмысленно).
     var canvas = view.querySelector('.lf-canvas');
     function pick(ev) {
-      var g = ev.target && ev.target.closest ? ev.target.closest('.lf-node') : null;
+      var g = ev.target && ev.target.closest ? ev.target.closest('.lf-node, .lf-hop, .lf-sink') : null;
       if (!g || !canViewUsers) return;
       ev.preventDefault();
-      var grp = g.getAttribute('data-group');
-      openPanel(view, grp ? 'g:' + grp : 'n:' + g.getAttribute('data-uuid'));
+      openPanel(view, cardKey(g));
     }
     canvas.addEventListener('click', function (ev) { if (dragged) { dragged = false; return; } pick(ev); });
     canvas.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' || ev.key === ' ') pick(ev); });
@@ -953,9 +1178,24 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       prefs.view = b.getAttribute('data-view') === 'grid' ? 'grid' : 'column';
       prefs.page = 0;
       savePrefs();
-      Array.prototype.forEach.call(view.querySelectorAll('.lf-seg-b'), function (x) { x.classList.toggle('on', x === b); });
+      Array.prototype.forEach.call(view.querySelectorAll('.lf-seg[data-view], .lf-seg-b[data-view]'), function (x) { x.classList.toggle('on', x === b); });
+      syncPosReset(view);
       resetZoom(view); scrollTop0(view); repaint(view);
     });
+    // Где открывать список «кто на ноде»: шторкой поверх схемы или рядом с ней.
+    view.querySelector('.lf-pm').addEventListener('click', function (ev) {
+      var b = ev.target && ev.target.closest ? ev.target.closest('.lf-seg-b') : null;
+      if (!b) return;
+      prefs.panel = b.getAttribute('data-panel') === 'side' ? 'side' : 'over';
+      prefs.panelChosen = true;
+      savePrefs();
+      Array.prototype.forEach.call(view.querySelectorAll('.lf-pm .lf-seg-b'), function (x) { x.classList.toggle('on', x === b); });
+      applyPanelMode(view);
+    });
+    view.querySelector('.lf-posreset').addEventListener('click', function () {
+      prefs[prefs.view === 'grid' ? 'posGrid' : 'pos'] = {}; savePrefs(); syncPosReset(view); repaint(view);
+    });
+    applyPanelMode(view);
     view.querySelector('.lf-pager').addEventListener('click', function (ev) {
       var b = ev.target && ev.target.closest ? ev.target.closest('.lf-pg') : null;
       if (!b) return;
@@ -984,6 +1224,29 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
 
   // ── масштаб: кнопки, колесо (к курсору), перетаскивание ──
   var dragged = false;
+  // Ключ карточки для выбора и расстановки: n:<uuid> нода, g:<k> группа, c:<uuid> прыжок, s:<tag> выход
+  function cardKey(g) {
+    if (g.classList.contains('lf-hop')) return 'c:' + g.getAttribute('data-hop');
+    if (g.classList.contains('lf-sink')) return 's:' + g.getAttribute('data-sink');
+    var grp = g.getAttribute('data-group');
+    return grp ? 'g:' + grp : 'n:' + g.getAttribute('data-uuid');
+  }
+  // Ключ расстановки: у прыжка свой префикс, чтобы не путать с нодой-целью
+  function posKey(key) { return key.indexOf('c:') === 0 ? 'h:' + key.slice(2) : key; }
+  var redrawRaf = null;
+  function redraw(view) {
+    if (redrawRaf) return;
+    redrawRaf = requestAnimationFrame(function () {
+      redrawRaf = null;
+      if (!lastData) return;
+      var canvas = view.querySelector('.lf-canvas'), svg0 = canvas && canvas.querySelector('svg');
+      var w0 = svg0 && svg0.getAttribute('data-w'), h0 = svg0 && svg0.getAttribute('data-h');
+      setSvg(view, renderSvg(lastData, selected));
+      var svg1 = canvas && canvas.querySelector('svg');
+      if (svg1 && (svg1.getAttribute('data-w') !== w0 || svg1.getAttribute('data-h') !== h0)) fit(view);
+    });
+  }
+  function syncPosReset(view) { var b = view.querySelector('.lf-posreset'); if (b) b.hidden = !hasPos(); }
   function applyZoom(view) {
     var z = view.querySelector('.lf-zoom'), v = view.querySelector('.lf-zv');
     if (z) z.style.transform = 'translate(' + zoom.x.toFixed(1) + 'px,' + zoom.y.toFixed(1) + 'px) scale(' + zoom.k.toFixed(3) + ')';
@@ -1028,20 +1291,36 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     var down = null;
     canvas.addEventListener('pointerdown', function (ev) {
       if (ev.button !== 0 || (ev.target && ev.target.closest && ev.target.closest('.lf-zoomctl'))) return;
+      // Карточка в режиме «столбец» — тащим её (сдвиг в единицах viewBox), иначе — пан схемы
+      var card = ev.target && ev.target.closest ? ev.target.closest('.lf-node, .lf-hop, .lf-sink') : null;
+      var svg = canvas.querySelector('svg');
+      if (card && svg) {
+        ev.preventDefault();   // иначе браузер начинает выделять текст карточек
+        var r = svg.getBoundingClientRect(), Wv = parseFloat(svg.getAttribute('data-w')) || 1050;
+        var key = posKey(cardKey(card)), cur = posOf(key);
+        down = { x: ev.clientX, y: ev.clientY, card: key, dx0: cur.dx, dy0: cur.dy, scale: r.width ? Wv / r.width : 1, moved: false, id: ev.pointerId };
+        return;
+      }
       down = { x: ev.clientX, y: ev.clientY, zx: zoom.x, zy: zoom.y, moved: false, id: ev.pointerId };
     });
     canvas.addEventListener('pointermove', function (ev) {
       if (!down || ev.pointerId !== down.id) return;
       var dx = ev.clientX - down.x, dy = ev.clientY - down.y;
       if (!down.moved && Math.abs(dx) + Math.abs(dy) < 4) return;
-      if (!down.moved) { down.moved = true; canvas.classList.add('lf-dragging'); try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ } }
+      if (!down.moved) { down.moved = true; canvas.classList.add(down.card ? 'lf-moving' : 'lf-dragging'); try { canvas.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ } }
+      if (down.card) {
+          posMap()[down.card] = { dx: Math.round(down.dx0 + dx * down.scale), dy: Math.round(down.dy0 + dy * down.scale) };
+        redraw(view);
+        return;
+      }
       zoom.x = down.zx + dx; zoom.y = down.zy + dy;
       applyZoom(view);
     });
     function up(ev) {
       if (!down) return;
       if (down.moved) { dragged = true; setTimeout(function () { dragged = false; }, 0); }
-      canvas.classList.remove('lf-dragging');
+      if (down.card && down.moved) { savePrefs(); syncPosReset(view); }
+      canvas.classList.remove('lf-dragging'); canvas.classList.remove('lf-moving');
       try { canvas.releasePointerCapture(down.id); } catch (e) { /* ignore */ }
       down = null;
     }
@@ -1049,7 +1328,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     canvas.addEventListener('pointercancel', up);
     // Двойной клик по пустому месту — сброс
     canvas.addEventListener('dblclick', function (ev) {
-      if (ev.target && ev.target.closest && (ev.target.closest('.lf-node') || ev.target.closest('.lf-zoomctl'))) return;
+      if (ev.target && ev.target.closest && (ev.target.closest('.lf-node, .lf-hop, .lf-sink') || ev.target.closest('.lf-zoomctl'))) return;
       resetZoom(view);
     });
     applyZoom(view);
