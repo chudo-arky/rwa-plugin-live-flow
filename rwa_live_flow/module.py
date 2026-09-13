@@ -23,21 +23,32 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
   var DATA_URL = API_BASE + '/data';
   var REFRESH_MS = 5000, DASH_MS = 1100;
   var timer = null, langTimer = null, panelTimer = null, resizeFn = null, keyFn = null;
+  // declared — группа CDN собрана по меткам владельца в конфиге («Через CDN»),
+  // иначе по признакам инбаунда («Предположительно CDN»). Ставится в renderSvg.
+  var cdnDeclared = false;
+  function cdnT(key) { return t()[cdnDeclared ? key + 'Decl' : key]; }
   var L = {
     ru: {
       title: 'Схема трафика', sub: 'Живой поток: пользователи → ноды → выход · клик по ноде — кто на ней сейчас', subNoUsers: 'Живой поток: пользователи → ноды → выход',
       now: 'Сейчас в сети', loading: 'загрузка…', updated: 'обновлено ', nodata: 'нет данных: ',
       online: ' онлайн', nodesCnt: ' нод',
       capUsers: 'ПОЛЬЗОВАТЕЛИ', capNodes: 'НОДЫ', capCascade: 'КАСКАД', capExit: 'ВЫХОД',
-      users: 'Пользователи', noUsers: 'нет пользователей', mbps: ' Мбит/с', ppl: ' чел.', active: ' активных', activeTip: 'активных по панели', vpn: 'VPN ⇅ ', net: 'сеть хоста', liveSrc: 'панель live', dbSrc: 'синк БД (до 5 мин)', mob: 'мобильный', fix: 'Wi-Fi/LAN', unk: 'сеть неизвестна', lgSplit: 'линии от групп слева: ', mobBox: 'Мобильная сеть', fixBox: 'Wi-Fi / LAN', cdnBox: 'Через CDN', cdnL: 'через CDN', unkBox: 'Сеть неизвестна', whyNoConn: 'агент ноды не сообщил IP', whyNoMeta: 'IP ещё без GeoIP', whyCdn: 'за CDN/прокси — нода не видит клиента, нужен trustedXForwardedFor (см. README)', allBox: 'Пользователи', zIn: 'приблизить', zOut: 'отдалить', zReset: 'сбросить масштаб', fSearch: 'поиск по имени ноды…', fActive: 'только активные', fTraffic: 'только с трафиком', vColumn: 'столбец', vGrid: 'колонки', shown: 'показано ', ofN: ' из ', pgPrev: 'предыдущая страница', pgNext: 'следующая страница', pgOf: ' из ', noMatch: 'по фильтру нод нет — измените поиск или снимите галочки', zHint: 'колесо мыши — масштаб (длинная схема листается колесом, масштаб — с Ctrl/⌘), перетаскивание — сдвиг', thNode: 'Нода', pGroup: 'Активные: ', pNoLive: 'живого опроса панели сейчас нет — сводный список по группам недоступен', pTrunc: 'срез панели неполный (юзеров больше лимита опроса)', pollErr: ' · опрос панели: ошибка', pollTimeout: ' · опрос панели: таймаут',
+      users: 'Пользователи', noUsers: 'нет пользователей', mbps: ' Мбит/с', active: ' активных', activeTip: 'активных по панели', vpn: 'VPN ⇅ ', net: 'сеть хоста', liveSrc: 'панель live', dbSrc: 'синк БД (до 5 мин)', mob: 'мобильный', fix: 'Wi-Fi/LAN', unk: 'сеть неизвестна', lgSplit: 'линии от групп слева: ', mobBox: 'Мобильная сеть', fixBox: 'Wi-Fi / LAN', cdnBox: 'Предположительно CDN', cdnBoxDecl: 'Через CDN', cdnLDecl: 'через CDN', cdnDecl: 'CDN', whyCdnDecl: 'вход помечен в конфиге как CDN — нода не видит клиента, нужен trustedXForwardedFor (см. README)', cdnL: 'предположительно через CDN/прокси', unkBox: 'Сеть неизвестна', whyNoConn: 'агент ноды не сообщил IP (состояние агента — в подсказке ноды)', whyNoMeta: 'IP ещё без GeoIP', whyCdn: 'предположительно за CDN/прокси: признак берётся из конфига инбаунда (HTTP-транспорт без Reality, security none или trustedXForwardedFor), а не из проверки на сети — нода не видит клиента, нужен trustedXForwardedFor (см. README)', allBox: 'Пользователи', zIn: 'приблизить', zOut: 'отдалить', zReset: 'сбросить масштаб', fSearch: 'поиск по имени ноды…', fActive: 'только активные', fTraffic: 'только с трафиком', vColumn: 'столбец', vGrid: 'колонки', shown: 'показано ', ofN: ' из ', pgPrev: 'предыдущая страница', pgNext: 'следующая страница', pgOf: ' из ', noMatch: 'по фильтру нод нет — измените поиск или снимите галочки', zHint: 'колесо мыши — масштаб (длинная схема листается колесом, масштаб — с Ctrl/⌘), перетаскивание — сдвиг', thNode: 'Нода', pGroup: 'Активные: ', pNoLive: 'живого опроса панели сейчас нет — сводный список по группам недоступен', pTrunc: 'срез панели неполный (юзеров больше лимита опроса)', pollErr: ' · опрос панели: ошибка', pollTimeout: ' · опрос панели: таймаут',
       internet: 'Интернет', blocked: 'Блокировка', toNet: 'выход в сеть', noMeasure: 'нет измерений',
+      ipFromPanel: 'IP по данным панели, а не агента ноды — тега инбаунда у такой записи нет', cxUnsupported: 'IP без агента недоступны: у этой версии админки нет метода Connections API', cxErr: 'опрос IP у панели: ошибка', tipExits: 'по выходам: ', tipCascShare: 'в каскад: ',
+      mxUnsupported: 'долей по веткам нет: у этой версии админки нет метода метрик нод',
+      mxEmpty: 'панель не отдала метрики нод — не настроены METRICS_USER/METRICS_PASS у панели либо у нод нет счётчиков',
+      mxErr: 'метрики нод: ошибка опроса — доли не обновляются',
       lgLive: 'идёт VPN-трафик (счётчики xray панели) — пунктир бежит', lgIdle: 'подключены, но молчат',
       lgBadge: 'в карточке ноды справа: реально активных по панели · счётчик ноды (с пингами авто-выбора)',
       offline: 'нет связи с нодой', profile: 'профиль', inbounds: 'инбаунды',
+      agNone: 'агент ноды молчит (метрик нет больше 5 мин) — IP и тип сети по этой ноде не собираются',
+      agNoLog: 'агент жив, но access.log не читается: проверьте AGENT_XRAY_LOG_PATH, монтирование тома и log.access в конфиг-профиле',
+      blindA: 'адреса клиентов не видны: у инбаунда ', blindB: ' не задан trustedXForwardedFor — Xray пишет всех как 127.0.0.1 (см. README)',
       tipCascTo: 'каскад → ', tipCascFrom: 'принимает каскад от ', lgCasc: 'каскад: нода → прыжок через ноду-цель → её выходы (чисел по нему у панели нет)',
       hopFrom: 'каскад из ', hopTipA: 'прыжок через ', hopTipB: ' — сюда каскадят: ', hopTipC: '; дальше — выходы этой ноды',
       posReset: 'вернуть расстановку', posHint: 'карточки можно перетаскивать мышью — линии идут за ними; расстановка запоминается в браузере',
-      pCascade: 'Каскад через ', pExit: 'Выход ', pByNodes: 'по нодам: ', pByNodesNote: ' — какой аутбаунд xray выбрал для конкретного пользователя, панель не знает (это видно только в access.log ноды)',
+      pCascade: 'Каскад через ', pExit: 'Выход ', pByNodes: 'по нодам: ', pByOut: 'по фактическому аутбаунду из access.log: ', pByOutNote: ' — кто за последние минуты уходил в эту ветку; долю его трафика лог не содержит, а за батч человек уходит в несколько веток сразу', pByNodesNote: ' — какой аутбаунд xray выбрал для конкретного пользователя, панель не знает: агент ноды присылает только инбаунд, выбранный аутбаунд остаётся на ноде',
       pnLabel: 'список: ', pnOver: 'поверх схемы', pnSide: 'рядом', pnHint: 'где открывать список «кто на ноде»: шторкой поверх схемы (схема не перестраивается) или рядом со схемой (масштаб схемы при этом не меняется, нажатая карточка остаётся на месте)',
       noProfiles: 'конфигурация выходов недоступна — выходы не показаны',
       profilesStale: 'конфигурация выходов устарела: панель не отвечает, показан последний удачный набор',
@@ -47,22 +58,29 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       pEmptyA: 'по панели за последние ', pEmptyB: ' мин на этой ноде никто не был активен; счётчик ноды считает и пинги клиентов с авто-выбором серверов',
       pNone: 'сейчас никого', pErr: 'не удалось загрузить: ', pClose: 'закрыть',
       thUser: 'Пользователь', thIp: 'IP', thAs: 'AS', thGeo: 'гео', thSince: 'Активен',
-      mobile: 'моб.', hosting: 'хостинг/VPN', cdn: 'CDN', inbound: 'инбаунд'
+      mobile: 'моб.', hosting: 'хостинг/VPN', cdn: 'CDN?'
     },
     en: {
       title: 'Traffic flow', sub: 'Live flow: users → nodes → exit · click a node to see who is on it', subNoUsers: 'Live flow: users → nodes → exit',
       now: 'Online now', loading: 'loading…', updated: 'updated ', nodata: 'no data: ',
       online: ' online', nodesCnt: ' nodes',
       capUsers: 'USERS', capNodes: 'NODES', capCascade: 'CASCADE', capExit: 'EXIT',
-      users: 'Users', noUsers: 'no users', mbps: ' Mbps', ppl: ' ppl', active: ' active', activeTip: 'active per panel', vpn: 'VPN ⇅ ', net: 'host NIC', liveSrc: 'panel live', dbSrc: 'DB sync (up to 5 min)', mob: 'mobile', fix: 'Wi-Fi/LAN', unk: 'unknown network', lgSplit: 'lines from the groups on the left: ', mobBox: 'Mobile network', fixBox: 'Wi-Fi / LAN', cdnBox: 'Via CDN', cdnL: 'via CDN', unkBox: 'Unknown network', whyNoConn: 'node agent reported no IP', whyNoMeta: 'IP not enriched by GeoIP yet', whyCdn: 'behind CDN/proxy — the node does not see the client, set trustedXForwardedFor (see README)', allBox: 'Users', zIn: 'zoom in', zOut: 'zoom out', zReset: 'reset zoom', fSearch: 'search node name…', fActive: 'active only', fTraffic: 'with traffic only', vColumn: 'column', vGrid: 'grid', shown: 'shown ', ofN: ' of ', pgPrev: 'previous page', pgNext: 'next page', pgOf: ' of ', noMatch: 'no nodes match the filter — change the search or clear the checkboxes', zHint: 'mouse wheel — zoom (a tall diagram scrolls with the wheel; zoom with Ctrl/⌘), drag — pan', thNode: 'Node', pGroup: 'Active: ', pNoLive: 'no live panel poll right now — group lists are unavailable', pTrunc: 'panel snapshot is truncated (more users than the poll limit)', pollErr: ' · panel poll: error', pollTimeout: ' · panel poll: timeout',
+      users: 'Users', noUsers: 'no users', mbps: ' Mbps', active: ' active', activeTip: 'active per panel', vpn: 'VPN ⇅ ', net: 'host NIC', liveSrc: 'panel live', dbSrc: 'DB sync (up to 5 min)', mob: 'mobile', fix: 'Wi-Fi/LAN', unk: 'unknown network', lgSplit: 'lines from the groups on the left: ', mobBox: 'Mobile network', fixBox: 'Wi-Fi / LAN', cdnBox: 'Presumably CDN', cdnBoxDecl: 'Via CDN', cdnLDecl: 'via CDN', cdnDecl: 'CDN', whyCdnDecl: 'the inbound is marked as CDN in the config — the node does not see the client, set trustedXForwardedFor (see README)', cdnL: 'presumably via CDN/proxy', unkBox: 'Unknown network', whyNoConn: 'node agent reported no IP (see the agent state in the node tooltip)', whyNoMeta: 'IP not enriched by GeoIP yet', whyCdn: 'presumably behind CDN/proxy: the flag comes from the inbound config (HTTP transport without Reality, security none or trustedXForwardedFor), not from a network-level check — the node does not see the client, set trustedXForwardedFor (see README)', allBox: 'Users', zIn: 'zoom in', zOut: 'zoom out', zReset: 'reset zoom', fSearch: 'search node name…', fActive: 'active only', fTraffic: 'with traffic only', vColumn: 'column', vGrid: 'grid', shown: 'shown ', ofN: ' of ', pgPrev: 'previous page', pgNext: 'next page', pgOf: ' of ', noMatch: 'no nodes match the filter — change the search or clear the checkboxes', zHint: 'mouse wheel — zoom (a tall diagram scrolls with the wheel; zoom with Ctrl/⌘), drag — pan', thNode: 'Node', pGroup: 'Active: ', pNoLive: 'no live panel poll right now — group lists are unavailable', pTrunc: 'panel snapshot is truncated (more users than the poll limit)', pollErr: ' · panel poll: error', pollTimeout: ' · panel poll: timeout',
       internet: 'Internet', blocked: 'Blocked', toNet: 'to the internet', noMeasure: 'not measured',
+      ipFromPanel: 'IP from the panel, not from the node agent — such a record has no inbound tag', cxUnsupported: 'IPs without an agent are unavailable: this admin version has no Connections API method', cxErr: 'IP poll from the panel: failed', tipExits: 'by exit: ', tipCascShare: 'into cascade: ',
+      mxUnsupported: 'no branch shares: this admin version has no node-metrics method',
+      mxEmpty: 'the panel returned no node metrics — METRICS_USER/METRICS_PASS not set on the panel, or the nodes have no counters',
+      mxErr: 'node metrics: poll failed — shares are not updating',
       lgLive: 'VPN traffic flowing (panel xray counters) — dashes move', lgIdle: 'connected but idle',
       lgBadge: 'on the node card, right: really active per panel · node counter (incl. auto-select probes)',
       offline: 'node unreachable', profile: 'profile', inbounds: 'inbounds',
+      agNone: 'node agent is silent (no metrics for over 5 min) — no IPs or network types are collected from this node',
+      agNoLog: 'the agent is alive but access.log is not being read: check AGENT_XRAY_LOG_PATH, the volume mount and log.access in the config profile',
+      blindA: 'client addresses are not visible: inbound ', blindB: ' has no trustedXForwardedFor — Xray logs everyone as 127.0.0.1 (see README)',
       tipCascTo: 'cascade → ', tipCascFrom: 'receives cascade from ', lgCasc: 'cascade: node → hop via the target node → its exits (the panel has no numbers for it)',
       hopFrom: 'cascade from ', hopTipA: 'hop via ', hopTipB: ' — cascaded from: ', hopTipC: '; then this node\'s exits',
       posReset: 'reset layout', posHint: 'cards can be dragged — the lines follow; the layout is remembered in the browser',
-      pCascade: 'Cascade via ', pExit: 'Exit ', pByNodes: 'by nodes: ', pByNodesNote: ' — which outbound xray picked for a given user is unknown to the panel (only the node access.log knows)',
+      pCascade: 'Cascade via ', pExit: 'Exit ', pByNodes: 'by nodes: ', pByOut: 'by the actual outbound from access.log: ', pByOutNote: ' — who went into this branch over the last few minutes; the log has no per-user byte shares, and one person uses several branches per batch', pByNodesNote: ' — which outbound xray picked for a given user is unknown to the panel: the node agent reports only the inbound, the chosen outbound stays on the node',
       pnLabel: 'list: ', pnOver: 'over the diagram', pnSide: 'beside', pnHint: 'where the “who is on the node” list opens: as a drawer over the diagram (the diagram is not re-laid out) or beside it (the diagram keeps its scale and the clicked card stays put)',
       noProfiles: 'exit config unavailable — exits are hidden',
       profilesStale: 'exit config is stale: the panel is not responding, showing the last good set',
@@ -72,7 +90,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       pEmptyA: 'per panel nobody was active on this node in the last ', pEmptyB: ' min; the node counter also counts probes from clients with server auto-select',
       pNone: 'nobody right now', pErr: 'failed to load: ', pClose: 'close',
       thUser: 'User', thIp: 'IP', thAs: 'AS', thGeo: 'geo', thSince: 'Active',
-      mobile: 'mobile', hosting: 'hosting/VPN', cdn: 'CDN', inbound: 'inbound'
+      mobile: 'mobile', hosting: 'hosting/VPN', cdn: 'CDN?'
     }
   };
   function lang() {
@@ -83,6 +101,32 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
   }
   function t() { return L[lang()]; }
   function locale() { return lang() === 'en' ? 'en-GB' : 'ru-RU'; }
+  // Линию к выходу рисуем, если это интернет ИЛИ по этой ветке есть измерение
+  // долей (nodes[].exit_shares из metrics.py). Прочие выходы остаются
+  // карточками без линии: чисел по ним панель по-прежнему не знает.
+  function lineSinksOf(sinks, nodes) {
+    return sinks.filter(function (sk) {
+      if (sk.kind === 'internet') return true;
+      for (var i = 0; i < nodes.length; i++) {
+        var e = nodes[i].exit_shares;
+        if (e && e[sk.tag] != null) return true;
+      }
+      return false;
+    });
+  }
+  // Округление вниз до нуля соврало бы: ветка в shares есть, только когда по ней
+  // реально шёл трафик (metrics.shares отбрасывает нулевые), поэтому «0 %» там
+  // не бывает — бывает «меньше процента».
+  function pct(v) { return v < 0.01 ? '<1%' : Math.round(v * 100) + '%'; }
+  // Доли в подсказке — по убыванию: первым то, куда ушло больше всего.
+  function shareText(map, label, names) {
+    var keys = map ? Object.keys(map) : [];
+    if (!keys.length) return '';
+    keys.sort(function (a, b) { return map[b] - map[a]; });
+    return ' · ' + label + keys.map(function (k) {
+      return (names ? (names[k] || k) : k) + ' ' + pct(map[k]);
+    }).join(', ');
+  }
   function sinkTitle(sk, manyInternet) {
     // При нескольких internet-выходах общее «Интернет» их не различает — показываем тег
     if (sk.kind === 'internet') return manyInternet ? (sk.title || sk.tag) : t().internet;
@@ -114,16 +158,10 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     return p ? '<g class="lf-ico" transform="translate(' + x + ',' + y + ') scale(0.75)">' + p + '</g>' : '';
   }
 
-  // Кубическая Безье с горизонтальными касательными на концах — та же кривая,
-  // что рисует edge(); bezPt даёт точку на ней, чтобы бейдж ложился НА линию.
+  // Кубическая Безье с горизонтальными касательными на концах.
   function edge(x0, y0, x1, y1) {
     var mx = (x0 + x1) / 2;
     return 'M ' + x0 + ' ' + y0 + ' C ' + mx + ' ' + y0 + ', ' + mx + ' ' + y1 + ', ' + x1 + ' ' + y1;
-  }
-  function bezPt(x0, y0, x1, y1, k) {
-    var mx = (x0 + x1) / 2, u = 1 - k;
-    var a = u * u * u, b = 3 * u * u * k, c = 3 * u * k * k, d = k * k * k;
-    return { x: a * x0 + b * mx + c * mx + d * x1, y: a * y0 + b * y0 + c * y1 + d * y1 };
   }
   // Концы линий раскладываем по высоте карточки, а не сводим в одну точку:
   // порт i из n в коробке высотой h с центром cy.
@@ -193,10 +231,10 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     var sel = selected === 'c:' + h.uuid ? ' sel' : '';
     var s = '<g class="lf-hop" data-hop="' + esc(h.uuid) + '" role="button" tabindex="0"><title>' + esc(tip) + '</title>';
     s += '<rect class="lf-box lf-hopbox' + (h.connected ? '' : ' off') + sel + '" x="' + p.x + '" y="' + y + '" width="' + nodeW + '" height="' + NH + '" rx="8"/>';
-    s += ico('chain', p.x + 16, y + 19);
-    s += '<text class="lf-t" x="' + (p.x + TXT) + '" y="' + (y + 21) + '" dominant-baseline="central">' + esc(shortName(h.name, 26)) + '</text>';
+    s += ico('chain', p.x + 16, y + NH / 2 - 9);
+    s += '<text class="lf-t" x="' + (p.x + TXT) + '" y="' + (y + NH / 2 - 7) + '" dominant-baseline="central">' + esc(shortName(h.name, 26)) + '</text>';
     var from = t().hopFrom + srcNames.map(function (n) { return String(n).split(/\s+/)[0]; }).join(', ');
-    s += '<text class="lf-s" x="' + (p.x + TXT) + '" y="' + (y + 39) + '" dominant-baseline="central">' + esc(shortName(from, 30)) + '</text>';
+    s += '<text class="lf-s" x="' + (p.x + TXT) + '" y="' + (y + NH / 2 + 11) + '" dominant-baseline="central">' + esc(shortName(from, 30)) + '</text>';
     return s + '</g>';
   }
   function byY(pos) { return function (a, b) { return pos['n:' + a.uuid].y - pos['n:' + b.uuid].y; }; }
@@ -206,7 +244,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     var parts = [];
     if (sp.mobile || sp.mobile_users) parts.push(t().mob + ' ' + (sp.mobile || 0).toFixed(2) + t().mbps + ' (' + (sp.mobile_users || 0) + ')');
     if (sp.fixed || sp.fixed_users) parts.push(t().fix + ' ' + (sp.fixed || 0).toFixed(2) + t().mbps + ' (' + (sp.fixed_users || 0) + ')');
-    if (sp.cdn || sp.cdn_users) parts.push(t().cdnL + ' ' + (sp.cdn || 0).toFixed(2) + t().mbps + ' (' + (sp.cdn_users || 0) + ')');
+    if (sp.cdn || sp.cdn_users) parts.push(cdnT('cdnL') + ' ' + (sp.cdn || 0).toFixed(2) + t().mbps + ' (' + (sp.cdn_users || 0) + ')');
     if (sp.unknown || sp.unknown_users) parts.push(t().unk + ' ' + (sp.unknown || 0).toFixed(2) + t().mbps + ' (' + (sp.unknown_users || 0) + ')');
     return parts.join(' · ');
   }
@@ -277,7 +315,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       ? [{ k: 'mobile', cls: 'm', icon: 'mobile', title: t().mobBox, users: tot.mobile_users || 0, mbps: tot.mobile || 0 },
          { k: 'fixed', cls: 'f', icon: 'wifi', title: t().fixBox, users: tot.fixed_users || 0, mbps: tot.fixed || 0 }]
       : [{ k: 'all', cls: 'a', icon: 'users', title: t().users, users: (d.total_active != null ? d.total_active : (d.total_users || 0)), mbps: null }];
-    if (tot && (tot.cdn_users || 0) > 0) classes.push({ k: 'cdn', cls: 'c', icon: 'cdn', title: t().cdnBox, users: tot.cdn_users || 0, mbps: tot.cdn || 0 });
+    if (tot && (tot.cdn_users || 0) > 0) classes.push({ k: 'cdn', cls: 'c', icon: 'cdn', title: cdnT('cdnBox'), users: tot.cdn_users || 0, mbps: tot.cdn || 0 });
     if (tot && (tot.unknown_users || 0) > 0) classes.push({ k: 'unknown', cls: 'u', icon: 'unknown', title: t().unkBox, users: tot.unknown_users || 0, mbps: tot.unknown || 0, why: tot.unknown_why });
     return classes;
   }
@@ -297,7 +335,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       var w = [];
       if (c.why.no_conn) w.push(c.why.no_conn + ' — ' + t().whyNoConn);
       if (c.why.no_meta) w.push(c.why.no_meta + ' — ' + t().whyNoMeta);
-      if (c.why.cdn) w.push(c.why.cdn + ' — ' + t().whyCdn);
+      if (c.why.cdn) w.push(c.why.cdn + ' — ' + cdnT('whyCdn'));
       if (w.length) tip += ' · ' + w.join(' · ');
     }
     var gsel = selected === 'g:' + c.k ? ' sel' : '';
@@ -321,7 +359,11 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       + (n.profile ? ' · ' + t().profile + ': ' + n.profile : '')
       + ((n.inbounds || []).length ? ' · ' + t().inbounds + ': ' + n.inbounds.join(', ') : '')
       + ((n.cascades || []).length ? ' · ' + t().tipCascTo + n.cascades.map(function (u) { return nodeNames[u] || u; }).join(', ') : '')
-      + (cascFrom[n.uuid] ? ' · ' + t().tipCascFrom + cascFrom[n.uuid].join(', ') : '');
+      + (cascFrom[n.uuid] ? ' · ' + t().tipCascFrom + cascFrom[n.uuid].join(', ') : '')
+      + shareText(n.exit_shares, t().tipExits, null)
+      + shareText(n.cascade_shares, t().tipCascShare, nodeNames)
+      + (n.agent_state === 'none' ? ' · ' + t().agNone : n.agent_state === 'metrics_only' ? ' · ' + t().agNoLog : '')
+      + ((n.blind_inbounds || []).length ? ' · ' + t().blindA + n.blind_inbounds.join(', ') + t().blindB : '');
     var s = '<g class="lf-node" data-uuid="' + esc(n.uuid) + '" role="button" tabindex="0"><title>' + esc(tip) + '</title>';
     s += '<rect class="lf-box' + off + sel + '" x="' + p.x + '" y="' + y + '" width="' + nodeW + '" height="' + NH + '" rx="8"/>';
     var tx = n.tx_mbps || 0, rx = n.rx_mbps || 0;
@@ -329,33 +371,38 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       : uc ? (n.vpn_mbps != null ? (t().vpn + n.vpn_mbps.toFixed(2) + t().mbps) : ('↑ ' + tx.toFixed(2) + ' · ↓ ' + rx.toFixed(2) + t().mbps)) : t().noUsers;
     var cnt = (n.connected && (uc > 0 || (n.active != null && n.active > 0)))
       ? ((n.active != null ? '<tspan class="lf-cnt-a">' + n.active + '</tspan><tspan class="lf-cnt-d"> · </tspan>' : '') + uc) : '';
-    s += ico('node', p.x + 16, y + 19);
-    s += '<text class="lf-t" x="' + (p.x + TXT) + '" y="' + (y + 21) + '" dominant-baseline="central">' + esc(n.name) + '</text>';
-    s += '<text class="lf-s" x="' + (p.x + TXT) + '" y="' + (y + 39) + '" dominant-baseline="central">' + esc(speed) + '</text>';
-    if (cnt) s += '<text class="lf-cnt" x="' + (p.x + nodeW - 12) + '" y="' + (y + 39) + '" text-anchor="end" dominant-baseline="central">' + cnt + '</text>';
+    var r1 = y + NH / 2 - 7, r2 = y + NH / 2 + 11;   // при NH 56 это прежние +21/+39
+    s += ico('node', p.x + 16, y + NH / 2 - 9);
+    s += '<text class="lf-t" x="' + (p.x + TXT) + '" y="' + r1 + '" dominant-baseline="central">' + esc(n.name) + '</text>';
+    s += '<text class="lf-s" x="' + (p.x + TXT) + '" y="' + r2 + '" dominant-baseline="central">' + esc(speed) + '</text>';
+    if (cnt) s += '<text class="lf-cnt" x="' + (p.x + nodeW - 12) + '" y="' + r2 + '" text-anchor="end" dominant-baseline="central">' + cnt + '</text>';
     return s + '</g>';
   }
   function drawSinkCard(sk, p, manyInternet) {
     var NH = GEO.NH, sinkW = GEO.sinkW, TXT = GEO.TXT, y = p.y - NH / 2, off = sk.kind === 'internet' ? '' : ' off';
+    var r1 = y + NH / 2 - 7, r2 = y + NH / 2 + 11;   // при NH 56 это прежние +21/+39
     var sel = selected === 's:' + sk.tag ? ' sel' : '';
     var s = '<g class="lf-sink" data-sink="' + esc(sk.tag) + '" role="button" tabindex="0"><title>' + esc(sinkTitle(sk, manyInternet) + (sk.addr ? ' → ' + sk.addr : '')) + '</title>';
     s += '<rect class="lf-box' + off + sel + '" x="' + p.x + '" y="' + y + '" width="' + sinkW + '" height="' + NH + '" rx="8"/>';
-    s += ico(sk.kind, p.x + 16, y + 19);
-    s += '<text class="lf-t" x="' + (p.x + TXT) + '" y="' + (y + 21) + '" dominant-baseline="central">' + esc(sinkTitle(sk, manyInternet)) + '</text>';
-    var sub = sk.kind === 'internet' ? t().toNet : (sk.kind === 'chain' && sk.addr ? '→ ' + sk.addr : t().noMeasure);
-    return s + '<text class="lf-s" x="' + (p.x + TXT) + '" y="' + (y + 39) + '" dominant-baseline="central">' + esc(sub) + '</text></g>';
+    s += ico(sk.kind, p.x + 16, y + NH / 2 - 9);
+    s += '<text class="lf-t" x="' + (p.x + TXT) + '" y="' + r1 + '" dominant-baseline="central">' + esc(sinkTitle(sk, manyInternet)) + '</text>';
+    // Доля трафика в процентах с карточек убрана по решению владельца: на схеме
+    // она мешала больше, чем помогала. Числа остались в подсказке ноды.
+    var sub = sk.kind === 'internet' ? t().toNet : (sk.kind === 'chain' && sk.addr ? '→ ' + sk.addr : (sk.share != null ? '' : t().noMeasure));
+    return s + '<text class="lf-s" x="' + (p.x + TXT) + '" y="' + r2 + '" dominant-baseline="central">' + esc(sub) + '</text></g>';
   }
   function svgOpen(W, H) {
     return '<svg viewBox="0 0 ' + W + ' ' + H + '" data-w="' + W + '" data-h="' + H + '" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMin meet">';
   }
 
   function renderSvg(d, selected) {
+    cdnDeclared = !!d && d.cdn_mode === 'declared';
+    indexCascades(d);
     var nodes = applyFilters(sortNodes(d));
     if (nodes.length === 0 && (d.nodes || []).length > 0) {
       // всё отфильтровано — короткая заглушка вместо схемы без нод
       return svgOpen(1050, 110) + '<text class="lf-cap" x="525" y="60" text-anchor="middle">' + esc(t().noMatch) + '</text></svg>';
     }
-    indexCascades(d);
     if (prefs.view === 'grid' && nodes.length > 0) return renderGrid(d, selected, nodes);
     // большой парк — страницами по COLUMN_PAGE, иначе схема на 100 нод тянется на тысячи пикселей
     var allN = nodes.length, pages = nodes.length > COLUMN_PAGE ? Math.ceil(nodes.length / COLUMN_PAGE) : 1;
@@ -393,6 +440,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     var live = sinks.filter(function (s) { return s.kind === 'internet'; });
     var other = sinks.filter(function (s) { return s.kind !== 'internet'; });
     var ordered = live.concat(other);
+    var lineSinks = lineSinksOf(sinks, nodes);
     var sinkTotalH = ordered.length ? ordered.length * NH + (ordered.length - 1) * 24 : 0;
     var sinkTop = Math.max(TOP, centerY - sinkTotalH / 2);
     ordered.forEach(function (sk, i) { place('s:' + sk.tag, sinkX, sinkTop + i * (NH + 24) + NH / 2, sinkW); });
@@ -444,9 +492,13 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     // нода → выход: у каждого internet-выхода свои порты по числу входящих линий
     var sinkEdges = [], hopSinkEdges = [];
     ordered.forEach(function (sk) {
-      if (sk.kind !== 'internet') return;
+      if (lineSinks.indexOf(sk) < 0) return;
       var sp = pos['s:' + sk.tag];
-      var src = active.filter(function (n) { return (n.sinks || []).indexOf(sk.tag) >= 0; });
+      var src = active.filter(function (n) {
+        if ((n.sinks || []).indexOf(sk.tag) < 0) return false;
+        // у измеренного выхода линия только от тех нод, где по нему реально шёл трафик
+        return sk.kind === 'internet' || (n.exit_shares && n.exit_shares[sk.tag] != null);
+      });
       // прыжки, чья нода-цель выходит в этот же internet-выход — порты после нод
       var viaHop = hops.filter(function (h) { return h.sinks.indexOf(sk.tag) >= 0; });
       var total = src.length + viaHop.length;
@@ -509,7 +561,8 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     var liveSinks = sinks.filter(function (s) { return s.kind === 'internet'; });
     var other = sinks.filter(function (s) { return s.kind !== 'internet'; });
     var ordered = liveSinks.concat(other);
-    var S = liveSinks.length;                        // 0 — линий к выходам нет, правые шины не нужны
+    var lineSinks = lineSinksOf(ordered, nodes);
+    var S = lineSinks.length;                        // 0 — линий к выходам нет, правые шины не нужны
 
     var lanesTop = cols * G, lanesBot = cols * S;
     var bandTop = TOP + 6;                         // первая дорожка верхней полосы
@@ -622,7 +675,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       if (S && n.users > 0) s += flowPath('', isLive(n), widthFor(n.users, maxUsers).toFixed(2), 'M ' + (p.x + nodeW) + ' ' + p.y + ' L ' + rbus(c) + ' ' + p.y);
     });
     // правая шина колонки → выход: по нижней полосе; порты выхода делятся с прыжками каскада
-    liveSinks.forEach(function (sk, si) {
+    lineSinks.forEach(function (sk, si) {
       var sp = pos['s:' + sk.tag];
       var viaHop = hops.filter(function (h) { return h.sinks.indexOf(sk.tag) >= 0; });
       var total = cols + viaHop.length;
@@ -736,14 +789,10 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       V + '.lf-flow.idle{stroke:hsl(var(--muted-foreground, 220 9% 56%) / .3)}' +
       V + '.lf-casc{fill:none;stroke-linecap:round;stroke-dasharray:2 5;stroke-width:1.8;stroke:hsl(172 66% 50% / .7);pointer-events:none}' +
       V + '.lf-casc.live{stroke:hsl(172 80% 56% / .95)}' +
-      V + '.lf-badge{fill:hsl(var(--card, 220 20% 10%));stroke:hsl(var(--primary, 239 84% 67%) / .5);stroke-width:1;pointer-events:none}' +
-      V + '.lf-badge-t{fill:hsl(var(--foreground, 220 9% 84%));font:500 12px/1 sans-serif;pointer-events:none}' +
-      V + '.lf-badge-d{fill:hsl(var(--muted-foreground, 220 9% 56%))}' +
       V + '.lf-cnt{fill:hsl(var(--foreground, 220 9% 84%));font:500 12.5px/1 sans-serif;pointer-events:none}' +
       V + '.lf-cnt-a{fill:hsl(var(--primary, 239 84% 67%));font-weight:600}' +
       V + '.lf-cnt-d{fill:hsl(var(--muted-foreground, 220 9% 56%))}' +
       V + '.lf-legend b.lf-sw{display:inline-block;width:18px;height:0;border-top:2px dashed;vertical-align:middle;margin:0 4px 0 8px}' +
-      V + '.lf-badge-a{fill:hsl(var(--primary, 239 84% 67%));font-weight:600}' +
       // Панель «кто на ноде»
       V + '.lf-panel{display:none;min-width:0;border:1px solid hsl(var(--border, 220 14% 18%));border-radius:10px;background:hsl(var(--muted, 220 14% 16%) / .5);padding:10px 14px 6px;font:400 13px/1.4 ui-sans-serif,system-ui,sans-serif;color:hsl(var(--foreground, 220 9% 84%))}' +
       V + '.lf-panel.open{display:block}' +
@@ -902,7 +951,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       + (d.live_source ? ' · ' + (d.live_source === 'panel-live' ? t().liveSrc : t().dbSrc) : '')
       + (d.poll_error === 'panel_timeout' ? t().pollTimeout : d.poll_error ? t().pollErr : '')
       + (d.poll_truncated ? ' · ' + t().pTrunc : '');
-    var other = (d.sinks || []).filter(function (s) { return s.kind !== 'internet'; });
+    var other = (d.sinks || []).filter(function (s) { return s.kind !== 'internet' && s.share == null; });
     // Состояние конфигурации выходов: недоступна (холодный старт без панели) /
     // устарела (последний удачный набор) / сниппеты не раскрыты — всё видно в легенде.
     var notes = [];
@@ -911,6 +960,11 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       if (d.profiles_stale) notes.push(t().profilesStale);
       if ((d.snippets_unresolved || []).length) notes.push(t().snippetsUnresolved + d.snippets_unresolved.join(', ') + t().snippetsUnresolvedB);
       if (other.length) notes.push(t().noteA + other.map(function (sk) { return sinkTitle(sk, false); }).join(', ') + t().noteB);
+      if (d.conn_error === 'connections_unsupported') notes.push(t().cxUnsupported);
+      else if (d.conn_error) notes.push(t().cxErr);
+      if (d.metrics_error === 'metrics_unsupported') notes.push(t().mxUnsupported);
+      else if (d.metrics_error === 'metrics_empty') notes.push(t().mxEmpty);
+      else if (d.metrics_error) notes.push(t().mxErr);
     }
     view.querySelector('.lf-note').textContent = notes.join(' · ');
     var lg = view.querySelectorAll('.lf-legend span');
@@ -921,10 +975,10 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     }
     var sl = view.querySelector('.lf-split-lg');
     var splitLg = d.vpn_split_total
-      ? t().lgSplit + '<b class="lf-sw" style="border-color:hsl(var(--primary, 239 84% 67%))"></b>' + t().mob + ' <b class="lf-sw" style="border-color:hsl(270 70% 66%)"></b>' + t().fix + ' <b class="lf-sw" style="border-color:hsl(38 80% 55%)"></b>' + t().cdnL + ' <b class="lf-sw" style="border-color:hsl(var(--muted-foreground, 220 9% 56%))"></b>' + t().unk
+      ? t().lgSplit + '<b class="lf-sw" style="border-color:hsl(var(--primary, 239 84% 67%))"></b>' + t().mob + ' <b class="lf-sw" style="border-color:hsl(270 70% 66%)"></b>' + t().fix + ' <b class="lf-sw" style="border-color:hsl(38 80% 55%)"></b>' + cdnT('cdnL') + ' <b class="lf-sw" style="border-color:hsl(var(--muted-foreground, 220 9% 56%))"></b>' + t().unk
       : '';
     var cascLg = hasCascades(d) ? '<b class="lf-sw" style="border-color:hsl(172 66% 50%)"></b>' + t().lgCasc : '';
-    if (sl) sl.innerHTML = splitLg + (splitLg && cascLg ? ' · ' : '') + cascLg;
+    if (sl) sl.innerHTML = [splitLg, cascLg].filter(Boolean).join(' · ');
     syncPager(view);
     if (panelData) paintPanel(view, panelData);
     fit(view);
@@ -969,7 +1023,8 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       ? tt.pGroup + pd.count + (pd.vpn_mbps != null ? ' · ' + tt.vpn + pd.vpn_mbps.toFixed(2) + tt.mbps : '')
       : tt.pSeen + pd.count + tt.pOf + pd.node.users_online + tt.pByPanel) + '</span>';
     h += '<button type="button" class="lf-px" aria-label="' + tt.pClose + '">✕ ' + tt.pClose + '</button></div>';
-    if (pd.by_nodes) h += '<div class="lf-pn">' + tt.pByNodes + esc((pd.nodes || []).join(', ')) + tt.pByNodesNote + '</div>';
+    if (pd.by_outbound) h += '<div class="lf-pn">' + tt.pByOut + esc((pd.nodes || []).join(', ')) + tt.pByOutNote + '</div>';
+    else if (pd.by_nodes) h += '<div class="lf-pn">' + tt.pByNodes + esc((pd.nodes || []).join(', ')) + tt.pByNodesNote + '</div>';
     if (!pd.users.length) {
       var mins = Math.max(1, Math.round((pd.window_s || 180) / 60));
       h += '<div class="lf-pn">' + (pd.unavailable ? tt.pNoLive : (!isGrp && pd.node.users_online > 0 ? tt.pEmptyA + mins + tt.pEmptyB : tt.pNone)) + '</div>';
@@ -994,14 +1049,16 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
           var as = r.asn ? '<b>AS' + esc(r.asn) + '</b>' : '<span class="lf-dim">—</span>';
           if (r.mobile) as += '<span class="lf-tag">' + tt.mobile + '</span>';
           if (r.hosting) as += '<span class="lf-tag">' + tt.hosting + '</span>';
-          if (r.cdn) as += '<span class="lf-tag">' + tt.cdn + '</span>';
+          if (r.cdn) as += '<span class="lf-tag">' + cdnT('cdn') + '</span>';
           if (r.as_name) as += '<span class="lf-asn">' + esc(r.as_name) + '</span>';
           if (r.country || r.city) as += '<span class="lf-geo">' + esc([r.country, r.city].filter(Boolean).join(' · ')) + '</span>';
           var since = esc(fmtSince(r.since))
             + (i === 0 && r.vpn_mbps != null ? '<span style="display:block">' + t().vpn + r.vpn_mbps.toFixed(2) + t().mbps + '</span>' : '')
             + (r.inbound ? '<span class="lf-dim" style="display:block">' + esc(r.inbound) + '</span>' : '');
           var ipCls = String(r.ip || '').indexOf(':') >= 0 ? 'lf-ip6c' : 'lf-ip4';
-          var ipCell = r.ip ? fmtIp(r.ip) : '<span class="lf-dim">—</span>';
+          // Откуда IP: агент ноды или снимок панели. Помечаем только второе —
+          // у такой записи нет тега инбаунда, и это видно сразу, а не по пустой клетке.
+          var ipCell = r.ip ? (fmtIp(r.ip) + (r.ip_source === 'panel' ? '<span class="lf-dim" title="' + esc(tt.ipFromPanel) + '"> ◦</span>' : '')) : '<span class="lf-dim">—</span>';
           var nodeCell = isGrp ? '<td class="lf-dim">' + esc(r.node || '—') + '</td>' : '';
           h += '<tr>' + (i === 0 ? '<td class="lf-u" rowspan="' + g.rows.length + '">' + who + '</td>' : '')
             + '<td class="' + ipCls + '">' + ipCell + '</td><td class="lf-as">' + as + '</td>' + nodeCell + '<td class="lf-dim">' + since + '</td></tr>';
@@ -1026,7 +1083,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       : k === 's:' ? API_BASE + '/exit/users?tag=' + id     // тег — query-параметром: в пути «/» внутри тега не доходит до маршрута
       : API_BASE + '/node/' + id + '/users';
   }
-  function groupTitle(k) { return k === 'mobile' ? t().mobBox : k === 'fixed' ? t().fixBox : k === 'cdn' ? t().cdnBox : k === 'unknown' ? t().unkBox : t().allBox; }
+  function groupTitle(k) { return k === 'mobile' ? t().mobBox : k === 'fixed' ? t().fixBox : k === 'cdn' ? cdnT('cdnBox') : k === 'unknown' ? t().unkBox : t().allBox; }
   function loadPanel(view, uuid) {
     return fetch(panelUrl(uuid), { credentials: 'same-origin', cache: 'no-store' })
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })

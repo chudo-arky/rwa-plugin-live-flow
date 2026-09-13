@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 # Человеческие названия для известных тегов. Незнакомые показываются как есть.
@@ -334,6 +334,8 @@ async def _profiles_by_uuid(logger, timeout: float | None = None, quiet: bool = 
             ],
             "inbounds": [str(i.get("tag")) for i in ins if isinstance(i, dict) and i.get("tag")],
             "cdn_inbounds": [str(i.get("tag")) for i in ins if isinstance(i, dict) and i.get("tag") and _inbound_behind_cdn(i)],
+            "cdn_declared": [str(i.get("tag")) for i in ins if isinstance(i, dict) and i.get("tag") and _inbound_declared_cdn(i)],
+            "blind_inbounds": [str(i.get("tag")) for i in ins if isinstance(i, dict) and i.get("tag") and _inbound_blind(i)],
         }
     return out
 
@@ -356,8 +358,68 @@ def _inbound_behind_cdn(ib: dict) -> bool:
     return net in _CDN_NETWORKS and sec != "reality" and (sec == "none" or bool(so.get("trustedXForwardedFor")))
 
 
+def _inbound_blind(ib: dict) -> bool:
+    """Инбаунд, у которого Xray гарантированно пишет всех клиентов как 127.0.0.1.
+
+    HTTP-транспорт на loopback (или unix-сокете) — значит перед ним обратный
+    прокси, и без ``sockopt.trustedXForwardedFor`` Xray берёт адрес самого
+    прокси. Проверено на Xray 26.7.28 (стенд 13.09.2026): предупреждение
+    «trustedXForwardedFor is not configured; ignoring it», в access.log —
+    127.0.0.1 у каждого. Следом слепнет всё: гео, ASN, деление по типу сети,
+    а в карту онлайн-IP xray loopback не кладёт вовсе, так что и снимок
+    панели адреса не даст. Исключение — PROXY protocol: с
+    ``acceptProxyProtocol`` ядро видит настоящий адрес подключившегося.
+    """
+    ss = ib.get("streamSettings") if isinstance(ib.get("streamSettings"), dict) else {}
+    if str(ss.get("network") or "tcp").lower() not in _CDN_NETWORKS:
+        return False
+    listen = str(ib.get("listen") or "").strip().lower()
+    local = listen in ("127.0.0.1", "::1", "localhost") or listen.startswith(("/", "@", "127."))
+    if not local:
+        return False
+    so = ss.get("sockopt") if isinstance(ss.get("sockopt"), dict) else {}
+    return not so.get("trustedXForwardedFor") and not so.get("acceptProxyProtocol")
+
+
+def _inbound_declared_cdn(ib: dict) -> bool:
+    """Инбаунд, который владелец сам объявил входом через CDN.
+
+    Метка — поле прямо в инбаунде конфиг-профиля::
+
+        { "tag": "Moscow CDN", ..., "liveFlow": { "cdn": true } }
+
+    Проверено 13.09.2026: Xray 26.7.28 принимает неизвестные поля
+    (``xray run -test`` — Configuration OK), а панель сохраняет конфиг как есть
+    (тело запроса — ``z.looseObject``, ``sortXrayConfig`` только переставляет
+    ключи). Правка метки — это обновление инбаунда, а не пересоздание: панель
+    узнаёт инбаунд по тегу, привязки хостов, сквадов и нод не рвутся.
+
+    🔴 Не переименовывать для этого сам тег: для панели новое имя — удаление
+    старого инбаунда и создание нового (хосты теряют привязку, из сквадов и с
+    нод он удаляется каскадом).
+
+    Доказательством метка не является: плагин верит владельцу. Проверить, что
+    до инбаунда доходит только трафик CDN, по данным админки нельзя.
+    """
+    mark = ib.get("liveFlow")
+    return isinstance(mark, dict) and mark.get("cdn") is True
+
+
+def _cdn_mode(profiles: dict | None) -> str:
+    """declared — хоть один инбаунд помечен владельцем; heuristic — меток нет.
+
+    Как только владелец поставил метку, эвристика выключается на всей
+    установке: помеченные входы — «через CDN», остальные — нет. Иначе рядом
+    жили бы объявленные и угаданные входы, и группа врала бы наполовину.
+    Без меток плагин ведёт себя как раньше — установки, где их не ставили,
+    ничего не теряют.
+    """
+    return "declared" if any((p.get("cdn_declared") or []) for p in (profiles or {}).values()) else "heuristic"
+
+
 def _cdn_tags(profiles: dict | None) -> set[str]:
-    return {t for p in (profiles or {}).values() for t in (p.get("cdn_inbounds") or [])}
+    key = "cdn_declared" if _cdn_mode(profiles) == "declared" else "cdn_inbounds"
+    return {t for p in (profiles or {}).values() for t in (p.get(key) or [])}
 
 
 _DEFAULT_OUTBOUNDS = [{"tag": "DIRECT", "protocol": "freedom"}]
@@ -437,6 +499,105 @@ async def _active_by_node(ctx) -> dict[str, int] | None:
     return {"by_node": {str(r["nu"]): int(r["c"]) for r in rows if r["nu"]}, "as_of": as_of}
 
 
+# ── Состояние агента ноды: есть ли он и читает ли access.log ───────
+# Без этого схема на ноде без разбора лога говорила «агент ноды не сообщил IP»
+# и не отличала «агента нет вовсе» от «агент жив, но access.log не читает».
+AGENT_STALE_S = 300.0        # тем же порогом сама админка считает потухшим внешний сервер
+AGENT_LOG_WINDOW_MIN = 30    # окно «приходил ли от ноды разбор access.log»
+AGENT_STATE_TTL_S = 60.0
+_agent_cache: dict = {"ts": 0.0, "map": None}
+
+
+async def _log_seen_by_node(ctx) -> dict[str, set[str]]:
+    """node_uuid → id пользователей, по которым агент дал строку.
+
+    Единственный писатель таблицы — коллектор админки, поэтому строка с
+    ``node_uuid = X`` доказывает, что агент X прислал разбор access.log.
+
+    Считается и открытая строка, и новая за окно, и обе нужны. ``connected_at``
+    пишется только при появлении новой пары (пользователь, IP) и потом не
+    обновляется — это ключ партиционирования. На ноде с постоянным составом
+    пользователей новых строк не будет часами, зато открытые висят: по одному
+    лишь окну такая нода выглядела бы сломанной (поймано на боевой — ALA-01,
+    пять открытых строк и ни одной новой за 67 минут).
+
+    🔴 Но одной открытой строки мало в обратную сторону. Коллектор закрывает
+    строки **только внутри батча от агента**, поэтому у агента, переставшего
+    присылать подключения, они висят открытыми вечно: на боевой нашлась строка
+    возрастом 5.6 суток. Сверять их с живой картиной панели нельзя — см.
+    ``_log_alive``, — поэтому выключенный лог зависшие строки маскируют.
+
+    Кэш на минуту: составного индекса ``(node_uuid, connected_at)`` в админке
+    нет, и на большой базе GROUP BY может уйти в seq scan по текущей партиции,
+    а ``/data`` дёргает каждая вкладка раз в 5 с. При сбое запроса держим
+    прошлый ответ и всё равно сдвигаем ts — иначе будем долбить тяжёлым
+    запросом каждые 5 с, пока база лежит.
+    """
+    import time as _time
+
+    now = _time.time()
+    c = _agent_cache
+    if c["map"] is not None and now - c["ts"] < AGENT_STATE_TTL_S:
+        return c["map"]
+    try:
+        rows = await ctx.db.fetch(
+            """
+            SELECT DISTINCT uc.node_uuid::text AS nu, u.id::text AS uid
+            FROM user_connections uc
+            JOIN users u ON u.uuid = uc.user_uuid
+            WHERE uc.node_uuid IS NOT NULL
+              AND (uc.disconnected_at IS NULL
+                   OR uc.connected_at > now() - make_interval(mins => $1))
+            """,
+            AGENT_LOG_WINDOW_MIN,
+        )
+    except Exception:  # noqa: BLE001 — диагностика не важнее самой схемы
+        ctx.logger.exception("live_flow: agent-state query failed")
+        c["ts"] = now
+        return c["map"] or {}
+    out: dict[str, set[str]] = {}
+    for r in rows:
+        if r["nu"]:
+            out.setdefault(str(r["nu"]), set()).add(str(r["uid"]))
+    c.update(ts=now, map=out)
+    return c["map"]
+
+
+def _log_alive(agent_uids: set[str]) -> bool:
+    """Есть ли по этой ноде разбор access.log. Снимок панели сюда намеренно не
+    передаётся — и вот почему, чтобы никто не вернул это обратно не подумав.
+
+    🔴 Сверять строки агента с тем, кого панель видит на ноде, НЕЛЬЗЯ:
+    ``node_uuid`` в открытой строке переписывает любой отчитавшийся агент, а
+    клиенты с авто-выбором пингуют все ноды подряд. Проверено на боевой
+    12.09.2026: у AMS-01 панель показывала пользователей 16, 31, 35, 40, 44,
+    50, 53, 87, а строки агента по той же ноде — 96, 99, 101; пересечения нет
+    вовсе, хотя агент исправен. Плюс снимок панели отстаёт до полутора минут,
+    и состояние начинало дрожать.
+
+    Поэтому признак остаётся слабым и односторонним: строки есть — считаем, что
+    разбор идёт. Цена — выключенный access.log на ноде так не определяется, пока
+    у неё висят прежние открытые строки. Это ограничение данных админки, а не
+    недосмотр: чтобы различать надёжно, нужна идентичность соединения с учётом
+    ноды и сеанса, которой в ``user_connections`` нет.
+    """
+    return bool(agent_uids)
+
+
+def _agent_state(metrics_age_s: float | None, users: int, log_seen: bool) -> str:
+    """none | metrics_only | log | idle — что известно про агента ноды.
+
+    ``metrics_only`` ставим ТОЛЬКО когда на ноде реально кто-то есть и при этом
+    агент не показал по ней ни одной строки (см. ``_log_seen_by_node``): на
+    пустой ноде сказать нечего, а ошибочный ярлык «сломан» хуже молчания.
+    """
+    if metrics_age_s is None or metrics_age_s > AGENT_STALE_S:
+        return "none"
+    if log_seen:
+        return "log"
+    return "metrics_only" if users > 0 else "idle"
+
+
 async def collect(ctx) -> dict:
     """Срез на «сейчас»: числа онлайна берём у панели, они авторитетнее наших.
 
@@ -444,6 +605,8 @@ async def collect(ctx) -> dict:
     15 с); пока опрос не успел или упал — активные по синку БД (лаг до 5 мин),
     скорость VPN не показывается (UI падает на сетевую ↑/↓ агента).
     """
+    from .connections import POLLER as CPOLLER
+    from .metrics import POLLER as MPOLLER
     from .poller import POLLER
 
     live = POLLER.fresh
@@ -466,6 +629,7 @@ async def collect(ctx) -> dict:
                COALESCE(net_tx_bps, 0)   AS tx,
                COALESCE(net_rx_bps, 0)   AS rx,
                is_connected,
+               metrics_updated_at,
                raw_data,
                CASE WHEN raw_data::jsonb->>'viewPosition' ~ '^-?[0-9]+$'
                     THEN (raw_data::jsonb->>'viewPosition')::int END AS position
@@ -476,6 +640,9 @@ async def collect(ctx) -> dict:
         ORDER BY position NULLS LAST, name
         """
     )
+
+    log_seen = await _log_seen_by_node(ctx)
+    now_utc = datetime.now(timezone.utc)
 
     profiles, profiles_stale = await _profiles_cached(ctx.logger)
     profiles_available = profiles is not None
@@ -499,6 +666,9 @@ async def collect(ctx) -> dict:
 
     sinks: dict[str, dict] = {}
     nodes: list[dict] = []
+    # байты по тегу за окно метрик, сложенные по всему парку: из них доля выхода
+    # «по парку» на карточке. Доля внутри ноды живёт в node["exit_shares"].
+    fleet_bytes: dict[str, float] = {}
 
     snippets_unresolved: list[str] = []
     for row in rows:
@@ -510,15 +680,27 @@ async def collect(ctx) -> dict:
 
         node_sinks: list[str] = []
         cascades: list[str] = []
+        # доли веток этой ноды за окно (None — мерить нечем, см. metrics.shares)
+        msh = MPOLLER.shares(row["uuid"])
+        shares = (msh or {}).get("shares") or {}
+        exit_shares: dict[str, float] = {}
+        casc_shares: dict[str, float] = {}
+        casc_tags: dict[str, list[str]] = {}
         for outbound in outbounds:
             tag = outbound["tag"]
             proto = outbound["protocol"]
             # Каскад: аутбаунд-цепочка, ведущая на другую НАШУ ноду. Это не выход,
             # а прыжок — рисуем ребром нода→нода, в список выходов не кладём.
             target = _cascade_target(outbound.get("addr"), row["uuid"], addr_to_uuid, resolved) if proto in _CHAIN_PROTOCOLS else None
+            share = shares.get(tag)
+            if share is not None:
+                fleet_bytes[tag] = fleet_bytes.get(tag, 0.0) + share * msh["bytes"]
             if target:
                 if target not in cascades:
                     cascades.append(target)
+                casc_tags.setdefault(target, []).append(tag)
+                if share is not None:
+                    casc_shares[target] = casc_shares.get(target, 0.0) + share
                 continue
             kind = _SINK_KIND.get(proto, "chain")
             sink = {"tag": tag, "title": _SINK_TITLES.get(tag, tag), "kind": kind}
@@ -526,14 +708,19 @@ async def collect(ctx) -> dict:
                 sink["addr"] = _norm_host(outbound.get("addr"))   # цепочка на чужой сервер — куда именно
             sinks.setdefault(tag, sink)
             node_sinks.append(tag)
+            if share is not None:
+                exit_shares[tag] = round(share, 4)
 
+        users_now = int((POLLER.nodes.get(row["uuid"]) or {}).get("users_online", row["users_online"] or 0)) if live else int(row["users_online"] or 0)
+        mu = row["metrics_updated_at"]
+        metrics_age_s = (now_utc - mu).total_seconds() if mu else None
         nodes.append(
             {
                 "uuid": row["uuid"],
                 "name": row["name"],
                 "position": row["position"],
                 # счётчик ноды: живой из опроса панели, иначе из синка БД
-                "users": int((POLLER.nodes.get(row["uuid"]) or {}).get("users_online", row["users_online"] or 0)) if live else int(row["users_online"] or 0),
+                "users": users_now,
                 # Сетевая скорость хоста (агент rw-admin, net_*_bps — БАЙТЫ/с,
                 # несмотря на имя) — справочно, в тултипе: там и SSH, и мониторинг.
                 "tx_mbps": round(float(row["tx"] or 0) * 8 / 1e6, 2),
@@ -549,11 +736,32 @@ async def collect(ctx) -> dict:
                 "active": (active.get(row["uuid"], 0) if active is not None else None),
                 "profile": profile.get("name"),
                 "inbounds": profile.get("inbounds") or [],
+                # инбаунды, где адрес клиента не виден в принципе (см. _inbound_blind)
+                "blind_inbounds": profile.get("blind_inbounds") or [],
                 "sinks": node_sinks,
                 "cascades": cascades,
+                # диагностика агента: none | metrics_only | log | idle (см. _agent_state)
+                "agent_state": _agent_state(
+                    metrics_age_s, users_now,
+                    _log_alive(log_seen.get(row["uuid"]) or set()),
+                ),
+                # доли трафика ноды по веткам за окно метрик: тег выхода → 0..1,
+                # uuid ноды-цели каскада → 0..1. Пусто — измерений нет.
+                "exit_shares": exit_shares,
+                "cascade_shares": {u: round(v, 4) for u, v in casc_shares.items()},
+                # теги аутбаундов, ведущих на эту ноду-цель: по ним видно,
+                # кто из пользователей реально ушёл в этот каскад
+                "cascade_tags": casc_tags,
+                "metrics_window_s": (msh or {}).get("window_s"),
+                "metrics_age_s": (None if metrics_age_s is None else round(metrics_age_s, 1)),
             }
         )
 
+    fleet_total = sum(fleet_bytes.values())
+    if fleet_total > 0:
+        for tag, b in fleet_bytes.items():
+            if tag in sinks:
+                sinks[tag]["share"] = round(b / fleet_total, 4)
     ordered = sorted(sinks.values(), key=lambda s: (_KIND_ORDER.get(s["kind"], 9), s["tag"]))
     return {
         "total_users": sum(n["users"] for n in nodes),
@@ -570,10 +778,20 @@ async def collect(ctx) -> dict:
         "nodes": nodes,
         "sinks": ordered,
         "profiles_available": profiles_available,
+        # declared — группа CDN по меткам владельца в конфиге, heuristic — по признакам инбаунда
+        "cdn_mode": _cdn_mode(profiles),
         "profiles_stale": bool(profiles_stale),
         # сниппеты, на которые ссылаются профили нод, но которых у панели нет:
         # ветки из них на схеме отсутствуют, UI показывает предупреждение
         "snippets_unresolved": snippets_unresolved,
+        # источник цифр по веткам выходов: ok — доли посчитаны; иначе код ошибки
+        # (metrics_unsupported | metrics_empty | metrics_timeout | metrics_unavailable)
+        "metrics_error": MPOLLER.error,
+        # источник IP: агент (user_connections) дополняется снимками панели там,
+        # где агент access.log не читает. Код ошибки — только если опрос упал.
+        "conn_error": CPOLLER.error,
+        "conn_nodes": sum(1 for n in nodes if CPOLLER.ips(n["uuid"]) is not None),
+        "metrics_age_s": (round(MPOLLER.age_s(), 1) if MPOLLER.age_s() is not None else None),
     }
 
 
@@ -726,7 +944,73 @@ CLASSIFY_TTL_S = 45.0
 _cls_cache: dict = {"ts": 0.0, "map": {}}
 
 
-async def _classify_users(ctx, ids_str: list) -> dict[str, str]:
+def _snapshot_taken_at(node_uuid: str):
+    """Когда снят снимок панели по этой ноде, или None.
+
+    🔴 Снимок отстаёт: обход нод идёт по кругу, и ему до полутора минут, тогда
+    как агент шлёт батч каждые 30 секунд. Поэтому опровергать строку агента
+    снимок вправе только если она СТАРШЕ него: иначе мы выбрасываем более
+    свежие данные, а вместе с ними тег инбаунда — и пользователь, только что
+    сменивший адрес, терял группу «Предположительно CDN».
+    """
+    from .connections import POLLER as CONN_POLLER
+
+    age = CONN_POLLER.age_s(node_uuid or "")
+    return None if age is None else datetime.now(timezone.utc) - timedelta(seconds=age)
+
+
+def _row_outdated(row_ip, connected_at, live_ips: set, snap_at) -> bool:
+    """Строка агента опровергнута снимком: её адреса в нём нет, и она старше него."""
+    if not live_ips or snap_at is None or row_ip in live_ips:
+        return False
+    return connected_at is None or connected_at <= snap_at
+
+
+async def _panel_ips(ctx, pairs) -> dict[str, tuple[str, dict | None]]:
+    """``{id пользователя: (IP, строка ip_metadata | None)}`` из снимка панели.
+
+    Дополняет ``user_connections`` там, где агент не разбирает access.log:
+    xray держит карту онлайн-IP, и панель отдаёт её по ``by-node``
+    (см. ``connections.py``). ``pairs`` — ``[(id, node_uuid)]``, обычно те
+    пользователи, у которых строки в БД нет.
+
+    🔴 Обогащения нет и не будет: ``ip_metadata`` только читается. У IP, до
+    которого GeoIP ещё не дошёл, честно остаётся причина ``no_meta``.
+
+    Приведение ``ip_address::text`` намеренное: в разных установках колонка
+    бывает и VARCHAR, и INET. Индекс при этом не используется, но список тут
+    короткий — только те, кого не нашли в ``user_connections``.
+    """
+    from .connections import POLLER as CONN_POLLER
+
+    found: dict[str, str] = {}
+    for uid, node_uuid in pairs:
+        ip = CONN_POLLER.user_ip(node_uuid or "", uid)
+        # 127.0.0.1 в карту xray не попадает вовсе, но приватный адрес мог
+        # прийти из-за локального прокси — класс сети по нему всё равно никакой
+        if ip and not _is_local_ip(ip):
+            found[str(uid)] = ip
+    if not found:
+        return {}
+    meta: dict[str, dict] = {}
+    try:
+        rows = await ctx.db.fetch(
+            """
+            SELECT ip_address::text AS ip, asn, asn_org, country_code, city,
+                   is_mobile, connection_type,
+                   (is_hosting OR is_vpn OR is_proxy OR is_tor) AS hosting,
+                   is_hosting, is_vpn, is_proxy
+            FROM ip_metadata WHERE ip_address::text = ANY($1::text[])
+            """,
+            sorted(set(found.values())),
+        )
+        meta = {r["ip"]: r for r in rows}
+    except Exception:  # noqa: BLE001 — без гео список всё равно полезен
+        ctx.logger.exception("live_flow: ip_metadata for panel IPs failed")
+    return {uid: (ip, meta.get(ip)) for uid, ip in found.items()}
+
+
+async def _classify_users(ctx, ids_str: list, node_of: dict | None = None) -> dict[str, str]:
     """id панели (строкой) → mobile | fixed | unknown по текущему IP юзера.
 
     Кэш на CLASSIFY_TTL_S: /data дёргается каждой вкладкой раз в 5 с, а класс
@@ -740,7 +1024,7 @@ async def _classify_users(ctx, ids_str: list) -> dict[str, str]:
     missing = [u for u in wanted if u not in cached]
     if not missing:
         return {u: cached[u] for u in wanted}
-    fresh = await _classify_users_db(ctx, missing)
+    fresh = await _classify_users_db(ctx, missing, node_of or {})
     merged = dict(cached)
     merged.update(fresh)
     if not cached:
@@ -749,7 +1033,7 @@ async def _classify_users(ctx, ids_str: list) -> dict[str, str]:
     return {u: merged.get(u, "unknown") for u in wanted}
 
 
-async def _classify_users_db(ctx, ids_str: list) -> dict[str, str]:
+async def _classify_users_db(ctx, ids_str: list, node_of: dict | None = None) -> dict[str, str]:
     ids = [int(u) for u in ids_str if str(u).isdigit()]
     cls: dict[str, str] = {}
     if not ids:
@@ -760,10 +1044,10 @@ async def _classify_users_db(ctx, ids_str: list) -> dict[str, str]:
             SELECT u.id, m.is_mobile, m.connection_type,
                    (m.is_hosting OR m.is_vpn OR m.is_proxy OR m.is_tor) AS hosting,
                    c.ip_address IS NOT NULL AS has_conn, m.ip_address IS NOT NULL AS has_meta,
-                   c.ip_address::text AS ip, c.device_info->>'inbound_tag' AS inbound
+                   c.ip_address::text AS ip, c.connected_at, c.device_info->>'inbound_tag' AS inbound
             FROM users u
             LEFT JOIN LATERAL (
-                SELECT c.ip_address, c.device_info FROM user_connections c
+                SELECT c.ip_address, c.connected_at, c.device_info FROM user_connections c
                 WHERE c.user_uuid = u.uuid
                   AND (c.disconnected_at IS NULL OR c.connected_at > now() - interval '10 minutes')
                 ORDER BY c.connected_at DESC LIMIT 1
@@ -773,8 +1057,19 @@ async def _classify_users_db(ctx, ids_str: list) -> dict[str, str]:
             """,
             ids,
         )
+        from .connections import POLLER as CONN_POLLER
+
         cdn_tags = _cdn_tags(_profiles_cache.get("data"))
         for r in rows:
+            # Та же проверка свежести, что в списках: строка агента живёт в БД
+            # открытой и после того, как человек ушёл с этого адреса. Без неё
+            # тип сети считался по вчерашнему IP, и на ноде без разбора лога
+            # деление бодро показывало «мобильный/Wi-Fi» там, где актуальный
+            # адрес вообще не известен. Пропущенных тут подберёт снимок панели.
+            node_uuid = (node_of or {}).get(str(r["id"])) or ""
+            live_ips = set((CONN_POLLER.ips(node_uuid) or {}).get(str(r["id"])) or ())
+            if _row_outdated(r["ip"], r["connected_at"], live_ips, _snapshot_taken_at(node_uuid)):
+                continue
             # 127.0.0.1 — Xray за локальным прокси без проброса заголовков: клиента не видно.
             # Если прокси пробрасывает X-Forwarded-For, IP настоящий и GeoIP решает как обычно;
             # тег CDN-инбаунда тогда лишь подсказывает причину, когда класс всё равно unknown.
@@ -789,6 +1084,15 @@ async def _classify_users_db(ctx, ids_str: list) -> dict[str, str]:
                 _cls_why[str(r["id"])] = _unknown_why(bool(r["has_conn"]), bool(r["has_meta"]), local)
             else:
                 _cls_why.pop(str(r["id"]), None)
+        # Кого не нашли в user_connections — пробуем снимком панели: на ноде без
+        # разбора access.log это единственный источник IP.
+        missing = [(str(u), (node_of or {}).get(str(u))) for u in ids_str if str(u) not in cls]
+        for uid, (_ip, m) in (await _panel_ips(ctx, missing)).items():
+            cls[uid] = "unknown" if m is None else _net_class(m["is_mobile"], m["connection_type"], bool(m["hosting"]))
+            if cls[uid] == "unknown":
+                _cls_why[uid] = "no_meta" if m is None else _unknown_why(True, True, False)
+            else:
+                _cls_why.pop(uid, None)
         for u in ids_str:
             cls.setdefault(str(u), "unknown")
             _cls_why.setdefault(str(u), "no_conn")
@@ -808,7 +1112,7 @@ async def _vpn_split(ctx, poller) -> tuple[dict[str, dict], dict]:
     act = poller.active_users()
     if not act:
         return {}, {"mobile": 0.0, "fixed": 0.0, "cdn": 0.0, "unknown": 0.0, "mobile_users": 0, "fixed_users": 0, "cdn_users": 0, "unknown_users": 0}
-    cls = await _classify_users(ctx, [uid for uid, _ in act])
+    cls = await _classify_users(ctx, [uid for uid, _ in act], {str(uid): u.get("node_uuid") for uid, u in act})
     def blank():
         return {"mobile": 0.0, "fixed": 0.0, "cdn": 0.0, "unknown": 0.0, "mobile_users": 0, "fixed_users": 0, "cdn_users": 0, "unknown_users": 0}
     per_node: dict[str, dict] = {}
@@ -852,6 +1156,7 @@ async def _users_rows(ctx, poller, live_users: list, with_node: bool = False) ->
             SELECT DISTINCT ON (c.user_uuid, c.ip_address)
                    c.user_uuid::text AS user_uuid, c.ip_address::text AS ip_address, c.connected_at,
                    c.device_info->>'inbound_tag' AS inbound,
+                   c.device_info->'outbound_tags' AS outbound,
                    m.asn, m.asn_org, m.country_code, m.city,
                    m.is_mobile, m.is_hosting, m.is_vpn, m.is_proxy
             FROM user_connections c
@@ -865,6 +1170,13 @@ async def _users_rows(ctx, poller, live_users: list, with_node: bool = False) ->
     by_user: dict[str, list] = {}
     for r in ip_rows:
         by_user.setdefault(r["user_uuid"], []).append(r)
+    from .connections import POLLER as CONN_POLLER
+
+    # Кого агент не показал — добираем снимком панели (Connections API)
+    panel = await _panel_ips(ctx, [
+        (uid, u.get("node_uuid")) for uid, u in live_users
+        if not by_user.get(id2uuid.get(uid, ""))
+    ])
     users = []
     for uid, u in live_users:
         who = u.get("username") or u.get("email") or (str(u.get("telegram_id")) if u.get("telegram_id") else "?")
@@ -879,8 +1191,37 @@ async def _users_rows(ctx, poller, live_users: list, with_node: bool = False) ->
             base["node"] = (poller.nodes.get(u.get("node_uuid") or "") or {}).get("name")
             base["node_uuid"] = u.get("node_uuid")
         rows_u = sorted(by_user.get(id2uuid.get(uid, ""), []), key=lambda r: r["connected_at"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+        # 🔴 Открытая строка ≠ актуальная: коллектор закрывает строки только
+        # внутри батча, поэтому у молчащего агента они висят сутками (на боевой
+        # нашлась пятидневная). Когда панель даёт по этому пользователю список
+        # адресов, он и есть текущий: строки агента с другими IP — прошлое.
+        # Пустой список панели ничего не опровергает (127.0.0.1 в карту xray не
+        # попадает), поэтому фильтруем только по непустому.
+        live_ips = set((CONN_POLLER.ips(u.get("node_uuid") or "") or {}).get(str(uid)) or ())
+        snap_at = _snapshot_taken_at(u.get("node_uuid") or "")
+        if live_ips:
+            rows_u = [r for r in rows_u if not _row_outdated(r["ip_address"], r["connected_at"], live_ips, snap_at)]
+            seen_ips = {r["ip_address"] for r in rows_u}
+            for extra in sorted(live_ips - seen_ips):
+                panel.setdefault(str(uid), (extra, None))
         if not rows_u:
-            users.append(dict(base, ip=None, asn=None, as_name=None, country=None, city=None, mobile=None, hosting=False, inbound=None, ip_since=None))
+            got = panel.get(str(uid))
+            if got is None and live_ips:
+                got = (sorted(live_ips)[0], None)
+            if got:
+                ip, m = got
+                users.append(dict(
+                    base, ip=ip,
+                    asn=(m or {}).get("asn"), as_name=(m or {}).get("asn_org"),
+                    country=(m or {}).get("country_code"), city=(m or {}).get("city"),
+                    mobile=(bool(m["is_mobile"]) if m and m["is_mobile"] is not None else None),
+                    hosting=bool(m and (m["is_hosting"] or m["is_vpn"] or m["is_proxy"])),
+                    # тега инбаунда в этом источнике нет — его знает только access.log
+                    inbound=None, cdn=False, outbound=None, ip_since=None,
+                    ip_source="panel",
+                ))
+                continue
+            users.append(dict(base, ip=None, asn=None, as_name=None, country=None, city=None, mobile=None, hosting=False, inbound=None, outbound=None, ip_since=None))
             continue
         for r in rows_u:
             users.append(dict(
@@ -889,7 +1230,10 @@ async def _users_rows(ctx, poller, live_users: list, with_node: bool = False) ->
                 mobile=(bool(r["is_mobile"]) if r["is_mobile"] is not None else None),
                 hosting=bool(r["is_hosting"] or r["is_vpn"] or r["is_proxy"]),
                 inbound=r["inbound"], cdn=r["inbound"] in _cdn_tags(_profiles_cache.get("data")),
+                # аутбаунды из access.log; jsonb приходит списком, у старого агента — NULL
+                outbound=_outbound_tags(r["outbound"]),
                 ip_since=r["connected_at"].isoformat() if r["connected_at"] else None,
+                ip_source="agent",
             ))
     return users
 
@@ -926,12 +1270,56 @@ async def _nodes_users(ctx, node_uuids: set[str], payload: dict) -> dict:
     return payload
 
 
+def _outbound_tags(value) -> list[str] | None:
+    """``device_info->'outbound_tags'`` → список тегов или None.
+
+    jsonb приходит то списком, то строкой: у asyncpg декодер json включён не
+    везде, и полагаться на одну форму нельзя. None — агент поля не прислал
+    (старая версия), пустой список — прислал, но аутбаундов в логе не было.
+    """
+    if isinstance(value, (list, tuple)):
+        return [str(t) for t in value]
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return None
+        if isinstance(parsed, list):
+            return [str(t) for t in parsed]
+    return None
+
+
+def _by_outbound(payload: dict, tags) -> dict:
+    """Оставить в списке тех, кто реально ходил через эти аутбаунды.
+
+    Работает, только когда агенты присылают ``outbound_tags`` (патч
+    ``collectors/xray_log.py`` + ``models.py``; у старых агентов поле пустое).
+    Если ни у кого тегов нет — список остаётся прежним, «по нодам», и UI
+    показывает прежнюю оговорку: соврать «никого» на старом агенте хуже, чем
+    отдать более широкий список.
+
+    ⚠️ Это «за последние минуты человек ходил через эту ветку», а не «весь его
+    трафик идёт туда»: за один батч один пользователь уходит в несколько веток
+    сразу, а байтов по веткам access.log не содержит вовсе.
+    """
+    want = {t for t in (tags or ()) if t}
+    rows = payload.get("users") or []
+    if not want or not any(r.get("outbound") for r in rows):
+        return payload
+    kept = [r for r in rows if want & set(r.get("outbound") or ())]
+    payload["users"] = kept
+    payload["count"] = len({(r.get("user"), r.get("node_uuid")) for r in kept})
+    payload["by_nodes"] = False
+    payload["by_outbound"] = True
+    return payload
+
+
 async def cascade_users(ctx, target_uuid: str) -> dict | None:
     """Кто сейчас на нодах, каскадящих на ноду-цель. None — такой цели нет.
 
-    Какой аутбаунд xray выбрал для конкретного юзера, панель не знает (это
-    живёт только в access.log ноды), поэтому список — активные на
-    нодах-источниках, с пометкой ``by_nodes``.
+    Если агенты присылают ``outbound_tags``, список сужается до тех, кто
+    действительно ушёл в этот каскад (``by_outbound``). Без них остаётся
+    прежнее поведение — все активные на нодах-источниках (``by_nodes``).
     """
     d = await collect(ctx)
     src = [n for n in d["nodes"] if target_uuid in (n.get("cascades") or [])]
@@ -944,7 +1332,8 @@ async def cascade_users(ctx, target_uuid: str) -> dict | None:
         "nodes": [n["name"] for n in src],
         "by_nodes": True,
     }
-    return await _nodes_users(ctx, {n["uuid"] for n in src}, payload)
+    tags = [t for n in src for t in (n.get("cascade_tags") or {}).get(target_uuid, [])]
+    return _by_outbound(await _nodes_users(ctx, {n["uuid"] for n in src}, payload), tags)
 
 
 async def exit_users(ctx, tag: str) -> dict | None:
@@ -955,7 +1344,7 @@ async def exit_users(ctx, tag: str) -> dict | None:
         return None
     src = [n for n in d["nodes"] if tag in (n.get("sinks") or [])]
     payload = {"kind": "exit", "sink": sink, "nodes": [n["name"] for n in src], "by_nodes": True}
-    return await _nodes_users(ctx, {n["uuid"] for n in src}, payload)
+    return _by_outbound(await _nodes_users(ctx, {n["uuid"] for n in src}, payload), [tag])
 
 
 GROUPS = ("mobile", "fixed", "cdn", "unknown", "all")
@@ -975,7 +1364,7 @@ async def group_users(ctx, group: str) -> dict:
     if group == "all":
         chosen = act
     else:
-        cls = await _classify_users(ctx, [uid for uid, _ in act])
+        cls = await _classify_users(ctx, [uid for uid, _ in act], {str(uid): u.get("node_uuid") for uid, u in act})
         chosen = [(uid, u) for uid, u in act if cls.get(str(uid), "unknown") == group]
     users = await _users_rows(ctx, POLLER, chosen, with_node=True)
     mbps = 0.0

@@ -6,9 +6,10 @@
 
 Форма графа берётся из конфиг-профилей панели, а не выдумывается: как только
 у профиля появится WARP или цепочка на другой сервер, соответствующий блок
-встанет на схему сам. Числа по таким веткам панель не знает — решение об
-аутбаунде живёт только в access.log ноды, поэтому линии рисуются лишь туда,
-где есть что измерять.
+встанет на схему сам. Линия к ветке появляется, когда по её счётчику в
+панели за последние минуты реально прошёл трафик (см. metrics.py); какой
+аутбаунд выбран для конкретного пользователя, видно только из access.log
+ноды — через агента админки.
 
 Импорты из ``web.backend.*`` отложены внутрь функций, чтобы пакет
 импортировался в изоляции.
@@ -44,16 +45,34 @@ __version__ = _own_version()
 def _build(ctx):
     from web.backend.core.plugins import PluginParts, ScheduledTask
 
+    from .connections import INTERVAL_S as CONN_INTERVAL_S
+    from .connections import POLLER as CONN_POLLER
+    from .metrics import INTERVAL_S as METRICS_INTERVAL_S
+    from .metrics import POLLER as METRICS_POLLER
     from .poller import INTERVAL_S, POLLER
     from .routes import build_router
 
     async def poll_tick() -> None:
         await POLLER.tick(ctx.logger)
 
+    async def metrics_tick() -> None:
+        await METRICS_POLLER.tick(ctx.logger)
+
+    async def connections_tick() -> None:
+        # список нод берём из среза панели: опрашивать отключённые незачем
+        await CONN_POLLER.tick(POLLER.nodes, ctx.logger)
+
     return PluginParts(
         router=build_router(ctx),
         # Опрос панели: скорость VPN по счётчикам xray и живой онлайн (см. poller.py).
-        scheduled_tasks=[ScheduledTask(name="panel-poll", interval_seconds=INTERVAL_S, coro=poll_tick)],
+        scheduled_tasks=[
+            ScheduledTask(name="panel-poll", interval_seconds=INTERVAL_S, coro=poll_tick),
+            # Байты по веткам выходов — отдельной задачей: свой backoff и свой код
+            # ошибки, чтобы сбой метрик не морозил основную схему (см. metrics.py).
+            ScheduledTask(name="metrics-poll", interval_seconds=METRICS_INTERVAL_S, coro=metrics_tick),
+            # IP пользователей там, где агент не читает access.log (см. connections.py)
+            ScheduledTask(name="connections-sweep", interval_seconds=CONN_INTERVAL_S, coro=connections_tick),
+        ],
     )
 
 

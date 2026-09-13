@@ -6,6 +6,7 @@ import re
 import pytest
 
 from rwa_live_flow import data as D
+from rwa_live_flow import metrics as M
 from rwa_live_flow.module import MODULE_JS
 
 
@@ -598,3 +599,403 @@ async def test_snippets_fallback_when_client_has_no_computed_method(fake_panel):
     assert not hasattr(fake_panel["api"], "get_config_profile_computed")
     out = await D._profiles_by_uuid(_Logger())
     assert [o["tag"] for o in out["p1"]["outbounds"]] == ["DIRECT", "warp-out"]
+
+
+# ── состояние агента ноды ──────────────────────────────────────────
+@pytest.mark.parametrize("m_age, users, seen, exp", [
+    (None, 5, True, "none"),              # метрик не было вовсе — агента нет
+    (900.0, 5, True, "none"),             # метрики протухли — агент умер
+    (10.0, 5, True, "log"),              # разбор лога приходит — всё работает
+    (10.0, 0, True, "log"),
+    (10.0, 5, False, "metrics_only"),      # агент жив, люди есть, а строк нет
+    (10.0, 0, False, "idle"),              # нода пуста — судить не о чем
+])
+def test_agent_state(m_age, users, seen, exp):
+    assert D._agent_state(m_age, users, seen) == exp
+
+
+async def test_log_age_cache_survives_db_failure(monkeypatch):
+    class Ctx:
+        logger = _Logger()
+
+        class db:
+            calls = 0
+
+            @staticmethod
+            async def fetch(*a, **k):
+                Ctx.db.calls += 1
+                if Ctx.db.calls == 1:
+                    return [{"nu": "n1", "uid": "7"}]
+                raise RuntimeError("db down")
+
+    D._agent_cache.update(ts=0.0, map=None)
+    assert await D._log_seen_by_node(Ctx) == {"n1": {"7"}}
+    D._agent_cache["ts"] = 0.0                       # просрочили кэш
+    assert await D._log_seen_by_node(Ctx) == {"n1": {"7"}}  # сбой — отдаём прошлое
+    assert D._agent_cache["ts"] > 0.0                # и всё равно ждём TTL, а не долбим базу
+
+
+# ── метрики нод: строки панели, окно, квантование ──────────────────
+def test_parse_iec_matches_panel_format():
+    # значения — из прогона самой панели (prettyBytesUtil поверх xbytes, IEC)
+    assert M.parse_iec("0") == 0                      # ровный ноль — без единицы
+    assert M.parse_iec("1.00 B") == 1
+    assert M.parse_iec("1.00 MiB") == 1048576
+    assert M.parse_iec("953.67 MiB") == 999995473     # это панельные 1e9 байт
+    assert M.parse_iec("5.50 TiB") == 6047313952768
+    for junk in (None, "", "junk", "12,3 GiB", "12 GB", -5):
+        assert M.parse_iec(junk) is None              # неизвестно, а не ноль
+    assert M.quantum("1.00 GiB") == 1073741824 // 100
+    assert M.quantum("0") == 1
+
+
+def _poller_with(snaps):
+    from collections import deque
+    p = M.NodeMetricsPoller()
+    p._win["n1"] = deque(snaps, maxlen=M.SNAPSHOTS)
+    return p
+
+
+def _snap(ts, vals, step):
+    kv = {("out", t): v for t, v in vals.items()}
+    return (ts, kv, {k: step for k in kv})
+
+
+def test_shares_split_by_branch():
+    step = M.quantum("1.00 GiB")
+    p = _poller_with([_snap(0.0, {"DIRECT": 0, "WARP": 0}, step),
+                      _snap(600.0, {"DIRECT": 80 * step, "WARP": 20 * step}, step)])
+    r = p.shares("n1")
+    assert round(r["shares"]["DIRECT"], 2) == 0.8
+    assert round(r["shares"]["WARP"], 2) == 0.2
+    assert r["window_s"] == 600.0
+
+
+@pytest.mark.parametrize("snaps", [
+    # один снимок — делить нечего
+    [_snap(0.0, {"DIRECT": 0}, 1)],
+    # окно короче MIN_WINDOW_S — доли ещё шумные
+    [_snap(0.0, {"DIRECT": 0}, 1), _snap(30.0, {"DIRECT": 10 ** 9}, 1)],
+    # дельта меньше двух шагов квантования: на TiB это штатное состояние,
+    # и «нет измерений» честнее застывших долей
+    [_snap(0.0, {"DIRECT": 0, "WARP": 0}, M.quantum("1.00 TiB")),
+     _snap(600.0, {"DIRECT": M.quantum("1.00 TiB"), "WARP": 0}, M.quantum("1.00 TiB"))],
+])
+def test_shares_returns_none_when_nothing_to_measure(snaps):
+    assert _poller_with(snaps).shares("n1") is None
+
+
+def test_shares_skip_branch_whose_counter_went_backwards():
+    # рестарт remnawave-scheduler обнуляет счётчики: такая ветка выпадает
+    # из окна целиком, а не даёт отрицательную долю
+    step = M.quantum("1.00 MiB")
+    p = _poller_with([_snap(0.0, {"DIRECT": 100 * step, "WARP": 0}, step),
+                      _snap(600.0, {"DIRECT": 5 * step, "WARP": 40 * step}, step)])
+    r = p.shares("n1")
+    assert set(r["shares"]) == {"WARP"} and r["shares"]["WARP"] == 1.0
+
+
+class _FakeMetricsApi:
+    def __init__(self, payload):
+        self.payload = payload
+
+    async def get_nodes_metrics(self):
+        return self.payload
+
+
+async def test_metrics_tick_drops_service_tags(fake_panel):
+    fake_panel["api"] = _FakeMetricsApi({"response": {"nodes": [{
+        "nodeUuid": "n1",
+        "inboundsStats": [{"tag": "REMNAWAVE_API_INBOUND", "upload": "1.00 MiB", "download": "0"}],
+        "outboundsStats": [{"tag": "DIRECT", "upload": "1.00 GiB", "download": "2.00 GiB"},
+                           {"tag": "RW_TB_OUTBOUND_BLOCK", "upload": "0", "download": "0"},
+                           "junk"],
+    }]}})
+    p = M.NodeMetricsPoller()
+    await p._tick_impl(_Logger())
+    vals = p._win["n1"][-1][1]
+    assert set(vals) == {("out", "DIRECT")}
+    assert vals[("out", "DIRECT")] == M.parse_iec("1.00 GiB") + M.parse_iec("2.00 GiB")
+    assert p.error is None
+
+
+async def test_metrics_tick_distinguishes_empty_and_unsupported(fake_panel):
+    fake_panel["api"] = _FakeMetricsApi({"response": {"nodes": []}})
+    p = M.NodeMetricsPoller()
+    await p._tick_impl(_Logger())
+    assert p.error == "metrics_empty" and p.as_of is not None
+
+    fake_panel["api"] = object()          # админка постарше, метода нет
+    p2 = M.NodeMetricsPoller()
+    await p2._tick_impl(_Logger())
+    assert p2.error == "metrics_unsupported"
+
+
+# ── фильтр списка по фактическому аутбаунду ────────────────────────────
+def _payload(rows):
+    return {"users": list(rows), "count": len(rows), "by_nodes": True, "nodes": ["n"]}
+
+
+def test_by_outbound_filters_when_agents_report_tags():
+    rows = [
+        {"user": "a", "node_uuid": "n1", "outbound": ["casc-fi", "DIRECT"]},
+        {"user": "b", "node_uuid": "n1", "outbound": ["DIRECT"]},
+        {"user": "c", "node_uuid": "n1", "outbound": []},
+    ]
+    out = D._by_outbound(_payload(rows), ["casc-fi", "casc-lv"])
+    assert [r["user"] for r in out["users"]] == ["a"]
+    assert out["by_outbound"] is True and out["by_nodes"] is False and out["count"] == 1
+
+
+def test_by_outbound_keeps_list_when_nobody_has_tags():
+    # старые агенты поля не шлют: соврать «никого» хуже, чем отдать список по нодам
+    rows = [{"user": "a", "node_uuid": "n1", "outbound": None},
+            {"user": "b", "node_uuid": "n1", "outbound": []}]
+    out = D._by_outbound(_payload(rows), ["casc-fi"])
+    assert len(out["users"]) == 2 and out["by_nodes"] is True and "by_outbound" not in out
+
+
+def test_by_outbound_without_tags_is_noop():
+    rows = [{"user": "a", "node_uuid": "n1", "outbound": ["DIRECT"]}]
+    assert D._by_outbound(_payload(rows), [])["users"] == rows
+
+
+async def test_users_rows_carry_outbound_tags(monkeypatch):
+    """Теги должны доезжать до строки ответа, а не только до SELECT."""
+    from datetime import datetime, timezone
+
+    now = datetime(2026, 9, 12, 12, 0, tzinfo=timezone.utc)
+
+    class Ctx:
+        logger = _Logger()
+
+        class db:
+            @staticmethod
+            async def fetch(sql, *a):
+                if "FROM users WHERE id" in sql:
+                    return [{"id": 7, "uuid": "u-7"}]
+                return [{
+                    "user_uuid": "u-7", "ip_address": "1.2.3.4", "connected_at": now,
+                    "inbound": "Estonia", "outbound": ["DIRECT", "warp-out"],
+                    "asn": None, "asn_org": None, "country_code": None, "city": None,
+                    "is_mobile": None, "is_hosting": None, "is_vpn": None, "is_proxy": None,
+                }]
+
+    class Poller:
+        nodes = {"n1": {"name": "TLL-01"}}
+
+        @staticmethod
+        def user_bps(_):
+            return None
+
+    rows = await D._users_rows(Ctx, Poller, [("7", {"username": "kot", "online_at": now, "node_uuid": "n1"})], with_node=True)
+    assert rows[0]["outbound"] == ["DIRECT", "warp-out"]
+    assert D._by_outbound({"users": rows, "count": 1, "by_nodes": True}, ["warp-out"])["by_outbound"] is True
+
+
+@pytest.mark.parametrize("raw, exp", [
+    (["DIRECT", "warp-out"], ["DIRECT", "warp-out"]),      # декодер jsonb включён
+    ('["DIRECT", "warp-out"]', ["DIRECT", "warp-out"]),    # ...и когда нет — та же строка
+    ("[]", []),                                            # агент прислал, аутбаундов не было
+    (None, None),                                          # старый агент поля не шлёт
+    ("не json", None), ('{"a": 1}', None), (5, None),
+])
+def test_outbound_tags_accepts_both_jsonb_forms(raw, exp):
+    assert D._outbound_tags(raw) == exp
+
+
+# ── M2: снимки Connections API ─────────────────────────────────────────
+from rwa_live_flow import connections as C  # noqa: E402
+
+
+def test_job_result_shapes():
+    ready = {"response": {"isCompleted": True, "result": {"success": True, "users": [
+        {"userId": 7, "ips": [{"ip": "1.2.3.4", "lastSeen": "x"}, {"ip": "5.6.7.8"}]},
+        {"userId": 9, "ips": []},          # за локальным прокси: xray 127.0.0.1 в карту не кладёт
+        {"ips": [{"ip": "9.9.9.9"}]},      # без userId — мусор
+    ]}}}
+    assert C._job_result(ready) == {"7": ["1.2.3.4", "5.6.7.8"], "9": []}
+    # нода не на связи: job завершился успешно, снимок пустой — это не ошибка
+    assert C._job_result({"response": {"isCompleted": True, "result": {"success": False, "users": []}}}) == {}
+    # ещё считается
+    assert C._job_result({"response": {"isCompleted": False}}) is None
+    assert C._job_result({}) is None and C._job_result(None) is None
+    assert C._job_id({"response": {"jobId": "1"}}) == "1"
+    assert C._job_id({"response": {}}) is None and C._job_id("мусор") is None
+
+
+class _FakeConnApi:
+    """Панель: POST отдаёт jobId, GET — готовый результат со второго раза."""
+
+    def __init__(self):
+        self.posts, self.gets = [], []
+
+    async def fetch_users_ips_by_node(self, node_uuid):
+        self.posts.append(node_uuid)
+        return {"response": {"jobId": "job-" + node_uuid}}
+
+    async def get_fetch_users_ips_result(self, job_id):
+        self.gets.append(job_id)
+        node = job_id.replace("job-", "")
+        if len(self.gets) < 2:
+            return {"response": {"isCompleted": False}}
+        return {"response": {"isCompleted": True, "result": {
+            "success": True, "nodeUuid": node, "users": [{"userId": 42, "ips": [{"ip": "203.0.113.7"}]}]}}}
+
+
+async def test_sweep_is_a_state_machine_without_sleeping(fake_panel):
+    api = _FakeConnApi()
+    fake_panel["api"] = api
+    p = C.ConnectionsPoller()
+    nodes = {"n1": {"connected": True, "disabled": False},
+             "n2": {"connected": False, "disabled": False}}   # отключённую не трогаем
+
+    await p._tick_impl(nodes, _Logger())          # тик 1: только POST
+    assert api.posts == ["n1"] and p.ips("n1") is None
+    await p._tick_impl(nodes, _Logger())          # тик 2: job ещё считается
+    assert p.ips("n1") is None and api.posts == ["n1"]
+    await p._tick_impl(nodes, _Logger())          # тик 3: результат приехал
+    assert p.ips("n1") == {"42": ["203.0.113.7"]}
+    assert p.user_ip("n1", 42) == "203.0.113.7"
+    assert p.user_ip("n1", 99) is None
+    assert "n2" not in p._st                       # отключённую ноду не опрашивали
+
+
+async def test_sweep_survives_dead_job_and_missing_method(fake_panel):
+    class Boom:
+        async def fetch_users_ips_by_node(self, node_uuid):
+            raise RuntimeError("A011")
+
+        async def get_fetch_users_ips_result(self, job_id):
+            raise RuntimeError("A218")
+
+    fake_panel["api"] = Boom()
+    p = C.ConnectionsPoller()
+    await p._tick_impl({"n1": {"connected": True, "disabled": False}}, _Logger())
+    assert p._st["n1"]["phase"] == "idle" and p._st["n1"]["fails"] == 1
+
+    fake_panel["api"] = object()                   # админка постарше — методов нет
+    p2 = C.ConnectionsPoller()
+    await p2._tick_impl({"n1": {"connected": True, "disabled": False}}, _Logger())
+    assert p2.error == "connections_unsupported"
+
+
+# ── свежесть: чему верим в состоянии агента ────────────────────────────
+@pytest.mark.parametrize("agent, snap, exp", [
+    ({"7"}, None, True),
+    (set(), None, False),
+    # 🔴 снимок панели НЕ участвует: node_uuid в user_connections ненадёжен,
+    # сверка по нему объявляла сломанными исправные ноды (AMS-01, 12.09.2026)
+    ({"13"}, {"7": ["1.1.1.1"]}, True),
+    (set(), {"7": ["1.1.1.1"]}, False),
+])
+def test_log_alive_ignores_panel_snapshot(agent, snap, exp):
+    assert D._log_alive(agent) is exp   # снимок в сигнатуре больше не принимается вовсе
+
+
+async def test_classify_ignores_stale_agent_row(fake_panel, monkeypatch):
+    import time
+    from datetime import datetime, timezone
+
+    """Тип сети не должен считаться по адресу, с которого человек уже ушёл."""
+    from rwa_live_flow import connections as CC
+
+    class Ctx:
+        logger = _Logger()
+
+        class db:
+            @staticmethod
+            async def fetch(sql, *a):
+                if "FROM ip_metadata WHERE" in sql:      # запрос _panel_ips
+                    return []                            # новый IP GeoIP ещё не знает
+                return [{
+                    "id": 7, "is_mobile": True, "connection_type": "mobile", "hosting": False,
+                    "has_conn": True, "has_meta": True, "ip": "10.0.0.9", "inbound": "in",
+                    "connected_at": datetime(2026, 9, 12, 10, 0, tzinfo=timezone.utc),
+                }]
+
+    # панель видит этого человека уже с другого адреса.
+    # 203.0.113.0/24 тут не годится: ipaddress считает диапазоны для
+    # документации приватными, и _is_local_ip отбросил бы адрес.
+    CC.POLLER._st["n1"] = {"phase": "idle", "job": None, "ips": {"7": ["91.79.15.105"]},
+                           "as_of": time.time(), "fails": 0}
+    try:
+        D._cls_cache.update(ts=0.0, map={})
+        cls = await D._classify_users_db(Ctx, ["7"], {"7": "n1"})
+        assert cls["7"] == "unknown"                     # не «мобильный» по старому IP
+        assert D._cls_why["7"] == "no_meta"              # честная причина
+    finally:
+        CC.POLLER._st.pop("n1", None)
+
+
+@pytest.mark.parametrize("ip, age_min, exp", [
+    # адрес есть в снимке — строка актуальна независимо от возраста
+    ("1.1.1.1", 600, False),
+    # адреса нет, строка старше снимка — опровергнута
+    ("2.2.2.2", 600, True),
+    # 🔴 адреса нет, но строка МОЛОЖЕ снимка: человек только что сменил IP,
+    # агент уже отчитался, а снимок отстал. Выбрасывать нельзя — потеряем
+    # тег инбаунда и вместе с ним группу «Предположительно CDN».
+    ("2.2.2.2", 0, False),
+])
+def test_row_outdated_respects_snapshot_age(ip, age_min, exp):
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    snap_at = now - timedelta(minutes=1)
+    connected_at = now - timedelta(minutes=age_min)
+    assert D._row_outdated(ip, connected_at, {"1.1.1.1"}, snap_at) is exp
+
+
+def test_row_outdated_without_snapshot_never_drops():
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    assert D._row_outdated("2.2.2.2", now, set(), now) is False      # снимка нет
+    assert D._row_outdated("2.2.2.2", now, {"1.1.1.1"}, None) is False  # возраст неизвестен
+
+
+# ── слепой инбаунд: Xray пишет всех как 127.0.0.1 ─────────────────────
+def _ib(listen=None, network="xhttp", sockopt=None):
+    ss = {"network": network, "security": "none"}
+    if sockopt is not None:
+        ss["sockopt"] = sockopt
+    ib = {"tag": "t", "streamSettings": ss}
+    if listen is not None:
+        ib["listen"] = listen
+    return ib
+
+
+@pytest.mark.parametrize("ib, exp", [
+    (_ib("127.0.0.1"), True),                                   # как во всех гайдах: слепой
+    (_ib("/dev/shm/xray.sock"), True),                          # unix-сокет за прокси — тоже
+    (_ib("127.0.0.1", sockopt={"trustedXForwardedFor": ["X-Forwarded-For"]}), False),
+    (_ib("127.0.0.1", sockopt={"acceptProxyProtocol": True}), False),   # PROXY protocol видит адрес
+    (_ib(None), False),                                         # наружу напрямую — адрес виден
+    (_ib("0.0.0.0"), False),
+    (_ib("127.0.0.1", network="tcp"), False),                   # reality/tcp — не HTTP-транспорт
+])
+def test_inbound_blind(ib, exp):
+    assert D._inbound_blind(ib) is exp
+
+
+# ── метка CDN владельцем в конфиге ─────────────────────────────────────
+@pytest.mark.parametrize("ib, exp", [
+    ({"tag": "x", "liveFlow": {"cdn": True}}, True),
+    ({"tag": "x", "liveFlow": {"cdn": "true"}}, False),   # строка — не метка: без двусмысленностей
+    ({"tag": "x", "liveFlow": {}}, False),
+    ({"tag": "x", "liveFlow": True}, False),
+    ({"tag": "x"}, False),
+])
+def test_inbound_declared_cdn(ib, exp):
+    assert D._inbound_declared_cdn(ib) is exp
+
+
+def test_declared_marks_switch_off_heuristic():
+    heur = {"p": {"cdn_inbounds": ["guess-a", "guess-b"], "cdn_declared": []}}
+    assert D._cdn_mode(heur) == "heuristic"
+    assert D._cdn_tags(heur) == {"guess-a", "guess-b"}
+    # владелец пометил один вход — угаданные больше не считаются CDN нигде
+    decl = {"p": {"cdn_inbounds": ["guess-a", "guess-b"], "cdn_declared": ["Moscow CDN"]},
+            "q": {"cdn_inbounds": ["guess-c"], "cdn_declared": []}}
+    assert D._cdn_mode(decl) == "declared"
+    assert D._cdn_tags(decl) == {"Moscow CDN"}
+    assert D._cdn_mode(None) == "heuristic"
