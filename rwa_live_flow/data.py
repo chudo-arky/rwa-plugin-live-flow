@@ -1230,7 +1230,7 @@ async def _users_rows(ctx, poller, live_users: list, with_node: bool = False) ->
                 mobile=(bool(r["is_mobile"]) if r["is_mobile"] is not None else None),
                 hosting=bool(r["is_hosting"] or r["is_vpn"] or r["is_proxy"]),
                 inbound=r["inbound"], cdn=r["inbound"] in _cdn_tags(_profiles_cache.get("data")),
-                # аутбаунды из access.log; jsonb приходит списком, у старого агента — NULL
+                # аутбаунды из access.log; jsonb приходит списком, у агента до 1.8.3 — NULL
                 outbound=_outbound_tags(r["outbound"]),
                 ip_since=r["connected_at"].isoformat() if r["connected_at"] else None,
                 ip_source="agent",
@@ -1292,8 +1292,8 @@ def _outbound_tags(value) -> list[str] | None:
 def _by_outbound(payload: dict, tags) -> dict:
     """Оставить в списке тех, кто реально ходил через эти аутбаунды.
 
-    Работает, только когда агенты присылают ``outbound_tags`` (патч
-    ``collectors/xray_log.py`` + ``models.py``; у старых агентов поле пустое).
+    Работает, только когда агенты присылают ``outbound_tags`` (агент нод с
+    1.8.3 при remnawave-admin от 4.8.3; у агентов постарше поля нет).
     Если ни у кого тегов нет — список остаётся прежним, «по нодам», и UI
     показывает прежнюю оговорку: соврать «никого» на старом агенте хуже, чем
     отдать более широкий список.
