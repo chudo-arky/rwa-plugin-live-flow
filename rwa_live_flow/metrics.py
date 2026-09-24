@@ -44,6 +44,7 @@ BACKOFF_MAX_S = 600.0
 WINDOW_S = 600.0                # окно для дельт: чем длиннее, тем меньше мешает квантование
 SNAPSHOTS = int(WINDOW_S // INTERVAL_S) + 1
 MIN_WINDOW_S = 90.0             # пока окно короче — доли не показываем, они ещё шумные
+STALE_S = 3 * INTERVAL_S        # последний снимок ноды старше — долей нет: опрос падает или нода пропала из ответа
 QUANTUM_FACTOR = 2.0            # суммарная дельта должна перерасти столько шагов квантования
 
 # Служебные теги xray самой панели — на схеме их нет и в долях быть не должно.
@@ -169,7 +170,11 @@ class NodeMetricsPoller:
                     vals[(kind, tag)] = (up or 0) + (down or 0)
                     steps[(kind, tag)] = max(quantum(st.get("upload")), quantum(st.get("download")))
             if vals:
-                self._win.setdefault(uuid, deque(maxlen=SNAPSHOTS)).append((now, vals, steps))
+                w = self._win.setdefault(uuid, deque(maxlen=SNAPSHOTS))
+                # после перерыва в опросе в окне остались бы снимки старше WINDOW_S
+                while w and now - w[0][0] > WINDOW_S:
+                    w.popleft()
+                w.append((now, vals, steps))
         # ноду убрали из панели — не держим её окно вечно
         self._win = {u: w for u, w in self._win.items() if now - w[-1][0] < WINDOW_S * 2}
         self.error = None
@@ -183,12 +188,18 @@ class NodeMetricsPoller:
     def shares(self, node_uuid: str, kind: str = "out") -> dict | None:
         """``{"shares": {тег: доля 0..1}, "window_s": …, "bytes": Σ Δ}`` или None.
 
-        None — когда мерить ещё нечем: одного снимка мало, окно короткое, или
-        суммарная дельта не переросла шаг квантования. Последнее на
-        TiB-масштабе штатно, и «нет измерений» там честнее застывших долей.
+        None — когда мерить ещё нечем: одного снимка мало, окно короткое,
+        последний снимок старше ``STALE_S``, или суммарная дельта не переросла
+        шаг квантования. Последнее на TiB-масштабе штатно, и «нет измерений»
+        там честнее застывших долей.
         """
         win = self._win.get(node_uuid)
         if not win or len(win) < 2:
+            return None
+        # Окно чистится только удачным тиком. Когда опрос падает или панель
+        # отдаёт пустой список, прошлые доли рисовали бы линии, которых уже
+        # никто не мерил.
+        if time.time() - win[-1][0] > STALE_S:
             return None
         (t0, v0, _), (t1, v1, s1) = win[0], win[-1]
         dt = t1 - t0

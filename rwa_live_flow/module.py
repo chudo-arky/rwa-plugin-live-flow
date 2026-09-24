@@ -49,6 +49,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       hopFrom: 'каскад из ', hopTipA: 'прыжок через ', hopTipB: ' — сюда каскадят: ', hopTipC: '; дальше — выходы этой ноды',
       posReset: 'вернуть расстановку', posHint: 'карточки можно перетаскивать мышью — линии идут за ними; расстановка запоминается в браузере',
       pCascade: 'Каскад через ', pExit: 'Выход ', pByNodes: 'по нодам: ', pByOut: 'по фактическому аутбаунду из access.log: ', pByOutNote: ' — кто за последние минуты уходил в эту ветку; долю его трафика лог не содержит, а за батч человек уходит в несколько веток сразу', pByNodesNote: ' — какой аутбаунд xray выбрал для конкретного пользователя, сейчас не видно: ни у кого в списке нет выбранных аутбаундов. Их присылает агент нод с версии 1.8.3 при remnawave-admin от 4.8.3 и включённом разборе access.log',
+      pUnverified: 'без данных об аутбаунде: ', pUnverifiedNote: ' — там агент старше 1.8.3 или IP взят у панели; такие строки оставлены целиком и помечены «?»', outUnknown: 'аутбаунд не виден — строка не отфильтрована',
       pnLabel: 'список: ', pnOver: 'поверх схемы', pnSide: 'рядом', pnHint: 'где открывать список «кто на ноде»: шторкой поверх схемы (схема не перестраивается) или рядом со схемой (масштаб схемы при этом не меняется, нажатая карточка остаётся на месте)',
       noProfiles: 'конфигурация выходов недоступна — выходы не показаны',
       profilesStale: 'конфигурация выходов устарела: панель не отвечает, показан последний удачный набор',
@@ -81,6 +82,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       hopFrom: 'cascade from ', hopTipA: 'hop via ', hopTipB: ' — cascaded from: ', hopTipC: '; then this node\'s exits',
       posReset: 'reset layout', posHint: 'cards can be dragged — the lines follow; the layout is remembered in the browser',
       pCascade: 'Cascade via ', pExit: 'Exit ', pByNodes: 'by nodes: ', pByOut: 'by the actual outbound from access.log: ', pByOutNote: ' — who went into this branch over the last few minutes; the log has no per-user byte shares, and one person uses several branches per batch', pByNodesNote: ' — which outbound xray picked for a given user is not visible right now: nobody in the list has outbound tags. They are reported by node agent 1.8.3+ with remnawave-admin 4.8.3+ and access.log parsing enabled',
+      pUnverified: 'no outbound data: ', pUnverifiedNote: ' — the agent there is older than 1.8.3 or the IP came from the panel; such rows are kept unfiltered and marked “?”', outUnknown: 'outbound not visible — row not filtered',
       pnLabel: 'list: ', pnOver: 'over the diagram', pnSide: 'beside', pnHint: 'where the “who is on the node” list opens: as a drawer over the diagram (the diagram is not re-laid out) or beside it (the diagram keeps its scale and the clicked card stays put)',
       noProfiles: 'exit config unavailable — exits are hidden',
       profilesStale: 'exit config is stale: the panel is not responding, showing the last good set',
@@ -128,8 +130,10 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     }).join(', ');
   }
   function sinkTitle(sk, manyInternet) {
-    // При нескольких internet-выходах общее «Интернет» их не различает — показываем тег
-    if (sk.kind === 'internet') return manyInternet ? (sk.title || sk.tag) : t().internet;
+    // При нескольких internet-выходах общее «Интернет» их не различает — показываем тег.
+    // DIRECT — исключение: у него человеческое имя есть, но с сервера оно приходит
+    // по-русски (_SINK_TITLES), поэтому берём его из словаря текущего языка.
+    if (sk.kind === 'internet') return manyInternet && sk.tag !== 'DIRECT' ? (sk.title || sk.tag) : t().internet;
     if (sk.kind === 'block') return t().blocked;
     return sk.title || sk.tag;
   }
@@ -935,6 +939,25 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
     // первый проход — из paint() после fit(): до подгонки SVG сжат CSS до 70vh
     // и «виден» целиком, разметка была бы вся помечена как видимая
   }
+  // Состояние конфигурации выходов: недоступна (холодный старт без панели) /
+  // устарела (последний удачный набор) / сниппеты не раскрыты. Сбои опроса IP
+  // и метрик от профилей не зависят и показываются всегда.
+  function configNotes(d) {
+    var other = (d.sinks || []).filter(function (s) { return s.kind !== 'internet' && s.share == null; });
+    var notes = [];
+    if (d.profiles_available === false) notes.push(t().noProfiles);
+    else {
+      if (d.profiles_stale) notes.push(t().profilesStale);
+      if ((d.snippets_unresolved || []).length) notes.push(t().snippetsUnresolved + d.snippets_unresolved.join(', ') + t().snippetsUnresolvedB);
+      if (other.length) notes.push(t().noteA + other.map(function (sk) { return sinkTitle(sk, false); }).join(', ') + t().noteB);
+    }
+    if (d.conn_error === 'connections_unsupported') notes.push(t().cxUnsupported);
+    else if (d.conn_error) notes.push(t().cxErr);
+    if (d.metrics_error === 'metrics_unsupported') notes.push(t().mxUnsupported);
+    else if (d.metrics_error === 'metrics_empty') notes.push(t().mxEmpty);
+    else if (d.metrics_error) notes.push(t().mxErr);
+    return notes;
+  }
   function paint(view, d) {
     setSvg(view, renderSvg(d, selected));
     canViewUsers = d.can_view_users !== false;   // false — права view_users нет; клики не предлагаем
@@ -951,22 +974,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       + (d.live_source ? ' · ' + (d.live_source === 'panel-live' ? t().liveSrc : t().dbSrc) : '')
       + (d.poll_error === 'panel_timeout' ? t().pollTimeout : d.poll_error ? t().pollErr : '')
       + (d.poll_truncated ? ' · ' + t().pTrunc : '');
-    var other = (d.sinks || []).filter(function (s) { return s.kind !== 'internet' && s.share == null; });
-    // Состояние конфигурации выходов: недоступна (холодный старт без панели) /
-    // устарела (последний удачный набор) / сниппеты не раскрыты — всё видно в легенде.
-    var notes = [];
-    if (d.profiles_available === false) notes.push(t().noProfiles);
-    else {
-      if (d.profiles_stale) notes.push(t().profilesStale);
-      if ((d.snippets_unresolved || []).length) notes.push(t().snippetsUnresolved + d.snippets_unresolved.join(', ') + t().snippetsUnresolvedB);
-      if (other.length) notes.push(t().noteA + other.map(function (sk) { return sinkTitle(sk, false); }).join(', ') + t().noteB);
-      if (d.conn_error === 'connections_unsupported') notes.push(t().cxUnsupported);
-      else if (d.conn_error) notes.push(t().cxErr);
-      if (d.metrics_error === 'metrics_unsupported') notes.push(t().mxUnsupported);
-      else if (d.metrics_error === 'metrics_empty') notes.push(t().mxEmpty);
-      else if (d.metrics_error) notes.push(t().mxErr);
-    }
-    view.querySelector('.lf-note').textContent = notes.join(' · ');
+    view.querySelector('.lf-note').textContent = configNotes(d).join(' · ');
     var lg = view.querySelectorAll('.lf-legend span');
     if (lg.length >= 3) {
       lg[0].innerHTML = '<i style="color:hsl(var(--primary, 239 84% 67%))"></i>' + t().lgLive;
@@ -1023,8 +1031,10 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
       ? tt.pGroup + pd.count + (pd.vpn_mbps != null ? ' · ' + tt.vpn + pd.vpn_mbps.toFixed(2) + tt.mbps : '')
       : tt.pSeen + pd.count + tt.pOf + pd.node.users_online + tt.pByPanel) + '</span>';
     h += '<button type="button" class="lf-px" aria-label="' + tt.pClose + '">✕ ' + tt.pClose + '</button></div>';
-    if (pd.by_outbound) h += '<div class="lf-pn">' + tt.pByOut + esc((pd.nodes || []).join(', ')) + tt.pByOutNote + '</div>';
-    else if (pd.by_nodes) h += '<div class="lf-pn">' + tt.pByNodes + esc((pd.nodes || []).join(', ')) + tt.pByNodesNote + '</div>';
+    if (pd.by_outbound) {
+      h += '<div class="lf-pn">' + tt.pByOut + esc((pd.nodes || []).join(', ')) + tt.pByOutNote + '</div>';
+      if ((pd.unverified_nodes || []).length) h += '<div class="lf-pn">' + tt.pUnverified + esc(pd.unverified_nodes.join(', ')) + tt.pUnverifiedNote + '</div>';
+    } else if (pd.by_nodes) h += '<div class="lf-pn">' + tt.pByNodes + esc((pd.nodes || []).join(', ')) + tt.pByNodesNote + '</div>';
     if (!pd.users.length) {
       var mins = Math.max(1, Math.round((pd.window_s || 180) / 60));
       h += '<div class="lf-pn">' + (pd.unavailable ? tt.pNoLive : (!isGrp && pd.node.users_online > 0 ? tt.pEmptyA + mins + tt.pEmptyB : tt.pNone)) + '</div>';
@@ -1050,6 +1060,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
           if (r.mobile) as += '<span class="lf-tag">' + tt.mobile + '</span>';
           if (r.hosting) as += '<span class="lf-tag">' + tt.hosting + '</span>';
           if (r.cdn) as += '<span class="lf-tag">' + cdnT('cdn') + '</span>';
+          if (pd.by_outbound && r.outbound == null) as += '<span class="lf-tag" title="' + esc(tt.outUnknown) + '">?</span>';
           if (r.as_name) as += '<span class="lf-asn">' + esc(r.as_name) + '</span>';
           if (r.country || r.city) as += '<span class="lf-geo">' + esc([r.country, r.city].filter(Boolean).join(' · ')) + '</span>';
           var since = esc(fmtSince(r.since))
@@ -1451,7 +1462,7 @@ MODULE_JS = r"""// live_flow: UI-модуль (generic-маршрут админ
   window.rwaPluginUI[PLUGIN_ID] = {
     mount: mount, unmount: unmount,
     // Для тестов раскладки (tests/js): чистые функции рендера и настройки без DOM.
-    __internals: { renderSvg: renderSvg, renderGrid: renderGrid, buildClasses: buildClasses, prefs: prefs, GEO: GEO }
+    __internals: { renderSvg: renderSvg, renderGrid: renderGrid, buildClasses: buildClasses, prefs: prefs, GEO: GEO, configNotes: configNotes, sinkTitle: sinkTitle }
   };
 })();
 """
