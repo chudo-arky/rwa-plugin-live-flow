@@ -277,7 +277,11 @@ async def _profiles_by_uuid(logger, timeout: float | None = None, quiet: bool = 
     body = resp.get("response") if isinstance(resp, dict) else None
     items = body.get("configProfiles") if isinstance(body, dict) else None
     if not isinstance(items, list):
-        items = []
+        # Ответ не той формы — не «профилей нет»: пустой набор лёг бы в кэш как
+        # удачный, и каждой ноде достался бы выдуманный DIRECT.
+        if not quiet:
+            logger.warning("live_flow: config profiles response has unexpected shape")
+        return None
     parsed: list[tuple[dict, dict]] = []
     for p in items:
         # Один кривой профиль не должен ронять схему: всё, что не той формы, пропускаем.
@@ -1298,6 +1302,11 @@ def _by_outbound(payload: dict, tags) -> dict:
     показывает прежнюю оговорку: соврать «никого» на старом агенте хуже, чем
     отдать более широкий список.
 
+    На смешанном парке фильтруются только строки с тегами. Строка без них
+    (агент старше 1.8.3, IP из снимка панели, IP нет вовсе) остаётся в списке,
+    а её нода попадает в ``unverified_nodes``: по ней выбранный аутбаунд не
+    виден, и выбросить человека значило бы соврать «через эту ветку не ходил».
+
     ⚠️ Это «за последние минуты человек ходил через эту ветку», а не «весь его
     трафик идёт туда»: за один батч один пользователь уходит в несколько веток
     сразу, а байтов по веткам access.log не содержит вовсе.
@@ -1306,11 +1315,18 @@ def _by_outbound(payload: dict, tags) -> dict:
     rows = payload.get("users") or []
     if not want or not any(r.get("outbound") for r in rows):
         return payload
-    kept = [r for r in rows if want & set(r.get("outbound") or ())]
+    kept, unverified = [], set()
+    for r in rows:
+        if r.get("outbound") is None:
+            kept.append(r)
+            unverified.add(r.get("node") or r.get("node_uuid") or "?")
+        elif want & set(r["outbound"]):
+            kept.append(r)
     payload["users"] = kept
     payload["count"] = len({(r.get("user"), r.get("node_uuid")) for r in kept})
     payload["by_nodes"] = False
     payload["by_outbound"] = True
+    payload["unverified_nodes"] = sorted(unverified)
     return payload
 
 

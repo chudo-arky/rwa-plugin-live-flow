@@ -511,7 +511,7 @@ def test_module_js_special_tags_and_config_notes():
     # тег выхода уходит query-параметром
     assert "'/exit/users?tag=' + id" in js and "'/exit/' + id + '/users'" not in js
     # состояние конфигурации выходов видно в легенде
-    assert "profilesStale" in js and "snippetsUnresolved" in js and "notes.join(' · ')" in js
+    assert "profilesStale" in js and "snippetsUnresolved" in js and "configNotes(d).join(' · ')" in js
     # колонка групп — единым блоком, высота холста учитывает её нижний край всегда
     assert "var groupTop = Math.max(TOP, centerY - colH / 2);" in js and "H = Math.max(H, groupTop + colH + 34, reach.y + 34);" in js
     assert "if (hasPos()) { W = Math.max" not in js
@@ -649,10 +649,13 @@ def test_parse_iec_matches_panel_format():
     assert M.quantum("0") == 1
 
 
-def _poller_with(snaps):
+def _poller_with(snaps, age=0.0):
+    """Окно из снимков; время сдвигается так, что последний снят ``age`` секунд назад."""
+    import time
     from collections import deque
+    shift = time.time() - age - max(s[0] for s in snaps)
     p = M.NodeMetricsPoller()
-    p._win["n1"] = deque(snaps, maxlen=M.SNAPSHOTS)
+    p._win["n1"] = deque([(ts + shift, v, st) for ts, v, st in snaps], maxlen=M.SNAPSHOTS)
     return p
 
 
@@ -873,6 +876,7 @@ async def test_sweep_survives_dead_job_and_missing_method(fake_panel):
     p = C.ConnectionsPoller()
     await p._tick_impl({"n1": {"connected": True, "disabled": False}}, _Logger())
     assert p._st["n1"]["phase"] == "idle" and p._st["n1"]["fails"] == 1
+    assert p.error == "connections_unavailable"    # ни один запрос не прошёл — это видно в легенде
 
     fake_panel["api"] = object()                   # админка постарше — методов нет
     p2 = C.ConnectionsPoller()
@@ -999,3 +1003,168 @@ def test_declared_marks_switch_off_heuristic():
     assert D._cdn_mode(decl) == "declared"
     assert D._cdn_tags(decl) == {"Moscow CDN"}
     assert D._cdn_mode(None) == "heuristic"
+
+
+# ── 0.17.6: сбои источников не выдаются за данные ──────────────────────
+def _live(n):
+    return {f"n{i}": {"connected": True, "disabled": False} for i in range(n)}
+
+
+class _Forbidden:
+    """Токену админки не выдали права на connections: каждый запрос — 403."""
+
+    def __init__(self):
+        self.posts = 0
+
+    async def fetch_users_ips_by_node(self, node_uuid):
+        self.posts += 1
+        raise RuntimeError("403")
+
+    async def get_fetch_users_ips_result(self, job_id):
+        raise RuntimeError("403")
+
+
+async def test_sweep_all_forbidden_backs_off_and_reports(fake_panel):
+    api = _Forbidden()
+    fake_panel["api"] = api
+    p = C.ConnectionsPoller()
+    await p.tick(_live(100), _Logger())
+    # неудачные попытки тоже в счёт лимита тика — не обходим весь парк
+    assert api.posts == C.NODES_PER_TICK
+    assert p.error == "connections_unavailable" and p.failures == 1
+    assert p._next_allowed > __import__("time").time()
+    await p.tick(_live(100), _Logger())            # общий backoff: запросов нет
+    assert api.posts == C.NODES_PER_TICK
+
+
+async def test_sweep_partial_failure_is_not_an_error_and_node_waits(fake_panel):
+    class Flaky(_FakeConnApi):
+        async def fetch_users_ips_by_node(self, node_uuid):
+            if node_uuid == "n0":
+                self.posts.append(node_uuid)
+                raise RuntimeError("node gone")
+            return await super().fetch_users_ips_by_node(node_uuid)
+
+    api = Flaky()
+    fake_panel["api"] = api
+    p = C.ConnectionsPoller()
+    await p._tick_impl(_live(2), _Logger())
+    assert p.error is None and p.failures == 0      # одна нода не отвечает — не сбой панели
+    assert p._st["n0"]["fails"] == 1 and p._st["n0"]["retry_at"] > __import__("time").time()
+    await p._tick_impl(_live(2), _Logger())
+    assert api.posts.count("n0") == 1               # у сбойной ноды своя пауза
+
+
+async def test_sweep_job_without_id_is_a_failure(fake_panel):
+    class NoJob(_FakeConnApi):
+        async def fetch_users_ips_by_node(self, node_uuid):
+            return {"response": {}}
+
+    fake_panel["api"] = NoJob()
+    p = C.ConnectionsPoller()
+    await p._tick_impl(_live(1), _Logger())
+    assert p._st["n0"]["fails"] == 1 and p.error == "connections_unavailable"
+
+
+def test_snapshot_expires_after_max_age():
+    import time
+    p = C.ConnectionsPoller()
+    p._st["n1"] = {"phase": "idle", "job": None, "ips": {"7": ["91.79.15.105"]},
+                   "as_of": time.time() - 60, "fails": 0}
+    assert p.user_ip("n1", 7) == "91.79.15.105" and p.age_s("n1") is not None
+    # обновить не выходит уже дольше порога — прошлый адрес не выдаём за текущий
+    p._st["n1"]["as_of"] = time.time() - C.SNAPSHOT_MAX_AGE_S - 1
+    assert p.ips("n1") is None and p.user_ip("n1", 7) is None and p.age_s("n1") is None
+
+
+async def test_snapshot_max_age_follows_fleet_size(fake_panel):
+    import time
+    fake_panel["api"] = _FakeConnApi()
+    p = C.ConnectionsPoller()
+    await p._tick_impl(_live(100), _Logger())
+    # на 100 нодах штатный круг ~8 мин: снимок такого возраста — не сбой
+    assert p.max_age_s() >= 2 * 8 * 60
+    p._st["n5"] = {"phase": "idle", "job": None, "ips": {"7": ["91.79.15.105"]},
+                   "as_of": time.time() - 9 * 60, "fails": 0}
+    assert p.user_ip("n5", 7) == "91.79.15.105"
+
+
+def test_shares_go_stale_when_polling_stops():
+    step = M.quantum("1.00 GiB")
+    snaps = [_snap(0.0, {"DIRECT": 0, "WARP": 0}, step),
+             _snap(600.0, {"DIRECT": 80 * step, "WARP": 20 * step}, step)]
+    assert _poller_with(snaps, age=M.INTERVAL_S).shares("n1") is not None
+    # опрос падает или панель отдаёт пустой список: окно не обновляется,
+    # и прошлые доли больше не рисуют линий
+    assert _poller_with(snaps, age=M.STALE_S + 1).shares("n1") is None
+
+
+async def test_metrics_failure_after_success_expires_shares(fake_panel, monkeypatch):
+    import time
+    step = M.quantum("1.00 GiB")
+    p = _poller_with([_snap(0.0, {"DIRECT": 0, "WARP": 0}, step),
+                      _snap(600.0, {"DIRECT": 80 * step, "WARP": 20 * step}, step)])
+    assert p.shares("n1") is not None
+    fake_panel["api"] = _FakeMetricsApi({"response": {"nodes": []}})
+    now = time.time()
+    monkeypatch.setattr(M.time, "time", lambda: now + M.STALE_S + 1)
+    await p._tick_impl(_Logger())
+    assert p.error == "metrics_empty" and p.shares("n1") is None
+
+
+async def test_metrics_window_drops_snapshots_older_than_window(fake_panel):
+    step = M.quantum("1.00 GiB")
+    p = _poller_with([_snap(0.0, {"DIRECT": 0}, step)], age=M.WINDOW_S + 60)   # до долгого перерыва
+    fake_panel["api"] = _FakeMetricsApi({"response": {"nodes": [{
+        "nodeUuid": "n1", "outboundsStats": [{"tag": "DIRECT", "upload": "5.00 GiB", "download": "0"}]}]}})
+    await p._tick_impl(_Logger())
+    assert len(p._win["n1"]) == 1                    # старый снимок не тянет окно в прошлое
+
+
+@pytest.mark.parametrize("payload", [
+    {"response": {"configProfiles": None}},
+    {"response": {"configProfiles": {"uuid": "p1"}}},
+    {"response": "oops"},
+    {"error": "x"},
+    "garbage",
+])
+async def test_profiles_malformed_response_is_not_empty_success(fake_panel, payload):
+    fake_panel["api"] = _FakePanel(payload)
+    assert await D._profiles_by_uuid(_Logger()) is None
+
+
+async def test_profiles_malformed_response_keeps_last_good(fake_panel, monkeypatch):
+    monkeypatch.setattr(D, "PROFILES_TTL_S", 0.0)
+    D._profiles_cache.update(ts=0.0, data=None, stale=False, last_log=0.0)
+    fake_panel["api"] = _FakePanel({"response": {"configProfiles": [{"uuid": "p1", "name": "ok", "config": {}}]}})
+    await D._profiles_cached(_Logger())
+    fake_panel["api"] = _FakePanel({"response": {"configProfiles": None}})
+    data, stale = await D._profiles_cached(_Logger())
+    assert set(data) == {"p1"} and stale is True     # не пустой набор с DIRECT у всех
+
+
+def test_by_outbound_mixed_fleet_keeps_rows_without_tags():
+    rows = [
+        {"user": "a", "node": "NEW", "node_uuid": "n1", "outbound": ["casc-fi"]},
+        {"user": "b", "node": "NEW", "node_uuid": "n1", "outbound": ["DIRECT"]},
+        {"user": "c", "node": "NEW", "node_uuid": "n1", "outbound": None, "ip_source": "panel"},
+        {"user": "d", "node": "OLD", "node_uuid": "n2", "outbound": None},
+    ]
+    out = D._by_outbound(_payload(rows), ["casc-fi"])
+    # b точно ходил мимо ветки — отфильтрован; у c и d аутбаунд не виден — остались
+    assert [r["user"] for r in out["users"]] == ["a", "c", "d"]
+    assert out["by_outbound"] is True and out["count"] == 3
+    assert out["unverified_nodes"] == ["NEW", "OLD"]
+
+
+def test_by_outbound_all_tagged_has_no_unverified():
+    rows = [{"user": "a", "node": "NEW", "node_uuid": "n1", "outbound": ["casc-fi"]}]
+    assert D._by_outbound(_payload(rows), ["casc-fi"])["unverified_nodes"] == []
+
+
+def test_module_js_marks_rows_without_outbound():
+    js = MODULE_JS
+    assert "pd.unverified_nodes" in js and "tt.pUnverified" in js
+    assert "pd.by_outbound && r.outbound == null" in js
+    # подпись есть на обоих языках
+    assert js.count("pUnverified:") == 2 and js.count("pUnverifiedNote:") == 2 and js.count("outUnknown:") == 2
