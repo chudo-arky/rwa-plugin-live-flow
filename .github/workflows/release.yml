@@ -1,0 +1,62 @@
+name: release
+
+# Ручной выпуск: Actions → release → Run workflow (только с main).
+# Версия — из pyproject.toml, текст — раздел CHANGELOG.md этой версии,
+# к релизу прикладываются wheel и sdist с таблицей sha256.
+on:
+  workflow_dispatch:
+    inputs:
+      title:
+        description: "Подзаголовок: «vX.Y.Z — <подзаголовок>»"
+        required: true
+      prerelease:
+        description: "Пре-релиз"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install package and tooling
+        run: python -m pip install --upgrade pip && python -m pip install -e . build twine pytest pytest-asyncio ruff bandit fastapi httpx
+      - name: Checks
+        run: |
+          ruff check .
+          bandit -q -c pyproject.toml -r rwa_live_flow
+          pytest -q
+          node --test tests/js/*.test.mjs
+      - name: Version and tag must be new
+        id: ver
+        run: |
+          v=$(python .github/scripts/release_notes.py --version)
+          if git ls-remote --exit-code --tags origin "refs/tags/v$v" >/dev/null; then
+            echo "::error::тег v$v уже есть — поднимите версию в pyproject.toml"; exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Build
+        run: python -m build && twine check dist/*
+      - name: Release notes
+        run: python .github/scripts/release_notes.py > notes.md && cat notes.md
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          TITLE: ${{ inputs.title }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); else flags+=(--latest); fi
+          gh release create "v$VERSION" dist/* --target "$GITHUB_SHA" \
+            --title "v$VERSION — $TITLE" --notes-file notes.md "${flags[@]}"
